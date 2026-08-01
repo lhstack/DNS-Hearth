@@ -1,0 +1,13 @@
+.idea/
+.vscode/
+.DS_Store
+src-tauri/target/
+frontend/node_modules/
+frontend/dist/
+*.db
+*.db-shm
+*.db-wal
+logs/
+config.toml
+
+node_modules/
