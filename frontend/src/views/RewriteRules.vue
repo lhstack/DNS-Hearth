@@ -22,7 +22,7 @@
     <el-row :gutter="20" class="stats-row">
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+          <div class="stat-icon" style="background: #409eff;">
             <el-icon><Edit /></el-icon>
           </div>
           <div class="stat-info">
@@ -33,7 +33,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);">
+          <div class="stat-icon" style="background: #67c23a;">
             <el-icon><CircleCheck /></el-icon>
           </div>
           <div class="stat-info">
@@ -44,7 +44,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);">
+          <div class="stat-icon" style="background: #f56c6c;">
             <el-icon><CloseBold /></el-icon>
           </div>
           <div class="stat-info">
@@ -55,7 +55,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+          <div class="stat-icon" style="background: #e6a23c;">
             <el-icon><Switch /></el-icon>
           </div>
           <div class="stat-info">
@@ -110,12 +110,8 @@
           </el-table-column>
           <el-table-column label="操作" width="120" fixed="right">
             <template #default="{ row }">
-              <el-button type="primary" link @click="openEditDialog(row)">
-                <el-icon><Edit /></el-icon>
-              </el-button>
-              <el-button type="danger" link @click="confirmDelete(row)">
-                <el-icon><Delete /></el-icon>
-              </el-button>
+              <el-button type="primary" link :icon="Edit" class="row-action" aria-label="编辑" @click="openEditDialog(row)" />
+              <el-button type="danger" link :icon="Delete" class="row-action" aria-label="删除" @click="confirmDelete(row)" />
             </template>
           </el-table-column>
           <template #empty>
@@ -680,7 +676,7 @@ onMounted(() => {
 }
 
 .custom-table :deep(.el-table__header th) {
-  background: #f8f9fa;
+  background: #f5f7fa;
   color: #606266;
   font-weight: 600;
 }

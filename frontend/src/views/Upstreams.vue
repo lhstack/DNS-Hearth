@@ -16,7 +16,7 @@
     <el-row :gutter="20" class="stats-row">
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+          <div class="stat-icon" style="background: #409eff;">
             <el-icon><Connection /></el-icon>
           </div>
           <div class="stat-info">
@@ -27,7 +27,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);">
+          <div class="stat-icon" style="background: #67c23a;">
             <el-icon><CircleCheck /></el-icon>
           </div>
           <div class="stat-info">
@@ -38,7 +38,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);">
+          <div class="stat-icon" style="background: #f56c6c;">
             <el-icon><Warning /></el-icon>
           </div>
           <div class="stat-info">
@@ -49,7 +49,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+          <div class="stat-icon" style="background: #e6a23c;">
             <el-icon><DataAnalysis /></el-icon>
           </div>
           <div class="stat-info">
@@ -128,23 +128,32 @@
           </el-table-column>
           <el-table-column label="操作" width="140" fixed="right">
             <template #default="{ row }">
-              <el-button class="table-action edit-action" type="primary" link aria-label="编辑服务器" @click="openEditDialog(row)">
-                <el-icon><Edit /></el-icon>
-              </el-button>
+              <el-button
+                type="primary"
+                link
+                :icon="Edit"
+                class="row-action"
+                aria-label="编辑服务器"
+                @click="openEditDialog(row)"
+              />
               <el-button
                 v-if="canResetHealth(row)"
                 type="warning"
                 link
-                class="table-action reset-action"
+                :icon="RefreshRight"
+                class="row-action"
                 aria-label="重置健康状态"
                 @click="resetHealth(row)"
                 :loading="resettingHealth === row.id"
-              >
-                <el-icon><RefreshRight /></el-icon>
-              </el-button>
-              <el-button type="danger" link @click="confirmDelete(row)">
-                <el-icon><Delete /></el-icon>
-              </el-button>
+              />
+              <el-button
+                type="danger"
+                link
+                :icon="Delete"
+                class="row-action"
+                aria-label="删除服务器"
+                @click="confirmDelete(row)"
+              />
             </template>
           </el-table-column>
           <template #empty>
@@ -647,7 +656,7 @@ onUnmounted(() => {
 }
 
 .custom-table :deep(.el-table__header th) {
-  background: #f8f9fa;
+  background: #f5f7fa;
   color: #606266;
   font-weight: 600;
 }
@@ -716,22 +725,6 @@ onUnmounted(() => {
   border-top: 1px solid #f0f0f0;
 }
 
-
-.table-action.el-button.is-link {
-  width: 30px;
-  height: 30px;
-  margin-left: 2px;
-  padding: 0;
-  border: 1px solid transparent !important;
-  border-radius: 8px;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-.table-action.el-button.is-link .el-icon { font-size: 16px; }
-.edit-action.el-button.is-link { color: #b84e32 !important; background: #fff0e7 !important; border-color: #f2c8b4 !important; }
-.edit-action.el-button.is-link:hover { color: #8f3524 !important; background: #ffe1d2 !important; }
-.reset-action.el-button.is-link { color: #b76c18 !important; background: #fff7e6 !important; }
-.delete-action.el-button.is-link { color: #c74b58 !important; }
 
 /* 对话框 */
 .custom-dialog :deep(.el-dialog__header) {

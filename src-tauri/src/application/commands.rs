@@ -425,8 +425,12 @@ fn available_strategy_views() -> Vec<Value> {
 
 fn strategy_description(strategy: QueryStrategy) -> &'static str {
     match strategy {
-        QueryStrategy::Concurrent => "同时查询所有可用上游，采用最先返回的有效响应。",
-        QueryStrategy::Fastest => "优先选择历史响应时间最短的健康上游。",
+        QueryStrategy::Concurrent => {
+            "同时查询所有健康上游；首个 NOERROR 立即返回，若无 NOERROR 则在全部完成后返回最快 NXDOMAIN。"
+        }
+        QueryStrategy::Fastest => {
+            "根据历史成功查询延迟选择最低延迟的健康上游，只向该上游发送查询。"
+        }
         QueryStrategy::RoundRobin => "按顺序轮换使用健康上游，均衡分配查询。",
         QueryStrategy::Random => "每次随机选择一个健康上游进行查询。",
     }

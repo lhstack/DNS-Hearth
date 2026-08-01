@@ -89,7 +89,7 @@ onUnmounted(() => {
 
 .card-icon {
   font-size: 18px;
-  color: #667eea;
+  color: #409eff;
 }
 
 .list-container {
@@ -160,7 +160,7 @@ onUnmounted(() => {
 
 .bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+  background: #409eff;
   border-radius: 3px;
 }
 

@@ -16,7 +16,7 @@
     <el-row :gutter="20" class="stats-row">
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+          <div class="stat-icon stat-icon--entries">
             <el-icon><Box /></el-icon>
           </div>
           <div class="stat-info">
@@ -27,7 +27,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);">
+          <div class="stat-icon stat-icon--hits">
             <el-icon><CircleCheck /></el-icon>
           </div>
           <div class="stat-info">
@@ -38,7 +38,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);">
+          <div class="stat-icon stat-icon--misses">
             <el-icon><CircleClose /></el-icon>
           </div>
           <div class="stat-info">
@@ -49,7 +49,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+          <div class="stat-icon stat-icon--rate">
             <el-icon><TrendCharts /></el-icon>
           </div>
           <div class="stat-info">
@@ -76,7 +76,7 @@
             label-position="top"
             v-loading="loadingConfig"
           >
-            <el-form-item label="默认 TTL（秒）">
+            <el-form-item label="无 Answer 记录时的默认 TTL（秒）">
               <el-input-number
                 v-model="configForm.default_ttl"
                 :min="1"
@@ -85,7 +85,9 @@
                 size="large"
                 style="width: 100%"
               />
-              <div class="form-tip">缓存条目的默认生存时间，范围 1-604800 秒</div>
+              <div class="form-tip">
+                正常响应遵守上游返回的最小 TTL；仅无 Answer TTL 的空响应使用此值，范围 1-604800 秒
+              </div>
             </el-form-item>
             <el-form-item label="最大条目数">
               <el-input-number
@@ -141,7 +143,7 @@
                 <span class="legend-value">{{ stats.hits }}</span>
               </div>
               <div class="legend-item">
-                <span class="legend-dot" style="background: #f56c6c;"></span>
+                <span class="legend-dot legend-dot--miss"></span>
                 <span class="legend-label">未命中</span>
                 <span class="legend-value">{{ stats.misses }}</span>
               </div>
@@ -162,37 +164,35 @@
       <el-row :gutter="24">
         <el-col :xs="24" :md="8">
           <div class="operation-item">
-            <div class="operation-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-              <el-icon><Search /></el-icon>
-            </div>
+            <el-icon class="operation-leading-icon operation-leading-icon--domain"><Search /></el-icon>
             <div class="operation-content">
               <h4>清除指定域名缓存</h4>
               <p>清除特定域名的所有缓存记录</p>
-              <el-input
-                v-model="clearDomain"
-                placeholder="输入域名，如 example.com"
-                size="large"
-                class="operation-input"
-              >
-                <template #append>
-                  <el-button
-                    type="primary"
-                    @click="clearDomainCache"
-                    :loading="clearingDomain"
-                    :disabled="!clearDomain"
-                  >
-                    清除
-                  </el-button>
-                </template>
-              </el-input>
+              <div class="domain-cache-form">
+                <el-input
+                  v-model="clearDomain"
+                  placeholder="输入域名，如 example.com"
+                  size="large"
+                  clearable
+                  @keyup.enter="clearDomain.trim() && clearDomainCache()"
+                />
+                <el-button
+                  type="primary"
+                  size="large"
+                  :icon="Search"
+                  @click="clearDomainCache"
+                  :loading="clearingDomain"
+                  :disabled="!clearDomain.trim()"
+                >
+                  清除
+                </el-button>
+              </div>
             </div>
           </div>
         </el-col>
         <el-col :xs="24" :md="8">
           <div class="operation-item">
-            <div class="operation-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
-              <el-icon><Delete /></el-icon>
-            </div>
+            <el-icon class="operation-leading-icon operation-leading-icon--clear"><Delete /></el-icon>
             <div class="operation-content">
               <h4>清除全部缓存</h4>
               <p>清除所有缓存条目，此操作不可撤销</p>
@@ -205,9 +205,7 @@
         </el-col>
         <el-col :xs="24" :md="8">
           <div class="operation-item">
-            <div class="operation-icon" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
-              <el-icon><Brush /></el-icon>
-            </div>
+            <el-icon class="operation-leading-icon operation-leading-icon--expired"><Brush /></el-icon>
             <div class="operation-content">
               <h4>清理过期缓存</h4>
               <p>清理所有已过期的缓存条目，释放内存</p>
@@ -376,268 +374,72 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.cache-management {
-  max-width: 1400px;
-  margin: 0 auto;
+.cache-management { width: 100%; max-width: 1400px; margin: 0 auto; }
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; }
+.header-left h1 { margin: 0 0 8px; color: var(--dns-ink); font-size: 24px; font-weight: 680; }
+.subtitle { margin: 0; color: var(--dns-muted); font-size: 14px; }
+.stats-row { margin-bottom: 22px; }
+.stats-row > .el-col { margin-bottom: 12px; }
+.stat-card { display: flex; align-items: center; gap: 15px; min-height: 104px; padding: 18px; }
+.stat-icon { display: flex; flex: 0 0 48px; align-items: center; justify-content: center; width: 48px; height: 48px; color: #ffffff; font-size: 23px; }
+.stat-icon--entries { background: #409eff; }
+.stat-icon--hits { background: #67c23a; }
+.stat-icon--misses { background: #f56c6c; }
+.stat-icon--rate { background: #e6a23c; }
+.stat-info { display: flex; min-width: 0; flex-direction: column; }
+.stat-value { color: var(--dns-ink); font-size: 24px; font-weight: 650; }
+.stat-label { margin-top: 4px; color: var(--dns-muted); font-size: 13px; }
+.config-row { display: flex; align-items: stretch; }
+.config-row > .el-col { display: flex; }
+.config-card, .chart-card, .operations-card { width: 100%; margin-bottom: 20px; }
+.config-card, .chart-card { display: flex; flex-direction: column; }
+.config-card :deep(.el-card__body), .chart-card :deep(.el-card__body) { display: flex; flex: 1; flex-direction: column; }
+.config-card :deep(.el-form) { display: flex; flex: 1; flex-direction: column; }
+.config-card :deep(.el-form-item:last-child) { margin-top: auto; margin-bottom: 0; }
+.config-card :deep(.el-form-item__content) { min-width: 0; }
+.card-title { display: flex; align-items: center; gap: 8px; color: var(--dns-ink); font-size: 16px; font-weight: 680; }
+.card-title .el-icon { color: var(--dns-primary); }
+.form-tip { width: 100%; margin-top: 7px; color: var(--dns-muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.hit-rate-chart { display: flex; flex: 1; align-items: center; justify-content: center; gap: clamp(28px, 5vw, 70px); min-height: 270px; padding: 18px 8px; }
+.chart-ring { flex: 0 0 auto; }
+.chart-center { display: flex; align-items: center; flex-direction: column; }
+.chart-value { color: var(--dns-ink); font-size: 28px; font-weight: 650; }
+.chart-label { color: var(--dns-muted); font-size: 14px; }
+.chart-legend { display: grid; gap: 14px; }
+.legend-item { display: grid; grid-template-columns: 12px auto auto; align-items: center; gap: 8px; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+.legend-dot--miss { background: var(--dns-rose); }
+.legend-label { color: var(--dns-muted); font-size: 14px; }
+.legend-value { color: var(--dns-ink); font-size: 14px; font-weight: 650; }
+.operations-card :deep(.el-row) { row-gap: 16px; }
+.operations-card :deep(.el-col) { display: flex; }
+.operation-item { display: flex; width: 100%; min-width: 0; min-height: 154px; gap: 14px; padding: 18px; border: 1px solid var(--dns-line-soft); border-radius: 6px; background: #f5f7fa; }
+.operation-leading-icon { flex: 0 0 28px; margin-top: 2px; font-size: 24px; }
+.operation-leading-icon--domain { color: #409eff; }
+.operation-leading-icon--clear { color: #f56c6c; }
+.operation-leading-icon--expired { color: #e6a23c; }
+.operation-content { display: flex; min-width: 0; flex: 1; align-items: flex-start; flex-direction: column; }
+.operation-content h4 { margin: 0 0 7px; color: var(--dns-ink); font-size: 15px; font-weight: 650; }
+.operation-content p { min-height: 40px; margin: 0 0 14px; color: var(--dns-muted); font-size: 13px; line-height: 1.55; }
+.operation-content > .el-button, .operation-content > .domain-cache-form { margin-top: auto; }
+.domain-cache-form { display: flex; width: 100%; gap: 10px; }
+.domain-cache-form .el-input { min-width: 0; flex: 1; }
+.domain-cache-form .el-button { flex: 0 0 auto; }
+@media (max-width: 1100px) {
+  .hit-rate-chart { flex-direction: column; gap: 20px; }
+  .chart-legend { display: flex; gap: 28px; }
 }
-
-/* 页面标题 */
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 24px;
-}
-
-.header-left h1 {
-  margin: 0 0 8px 0;
-  font-size: 24px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.subtitle {
-  margin: 0;
-  font-size: 14px;
-  color: #909399;
-}
-
-/* 统计卡片 */
-.stats-row {
-  margin-bottom: 24px;
-}
-
-.stat-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 20px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
-  transition: transform 0.3s, box-shadow 0.3s;
-}
-
-.stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-}
-
-.stat-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 24px;
-}
-
-.stat-info {
-  display: flex;
-  flex-direction: column;
-}
-
-.stat-value {
-  font-size: 24px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.stat-label {
-  font-size: 13px;
-  color: #909399;
-  margin-top: 4px;
-}
-
-/* 配置行 - 等高卡片 */
-.config-row {
-  display: flex;
-  align-items: stretch;
-}
-
-.config-row > .el-col {
-  display: flex;
-}
-
-/* 卡片样式 */
-.config-card,
-.chart-card,
-.operations-card {
-  border-radius: 12px;
-  border: none;
-  margin-bottom: 20px;
-  width: 100%;
-}
-
-.config-card,
-.chart-card {
-  display: flex;
-  flex-direction: column;
-}
-
-.config-card :deep(.el-card__body),
-.chart-card :deep(.el-card__body) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.config-card :deep(.el-form) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-}
-
-.config-card :deep(.el-form-item:last-child) {
-  margin-top: auto;
-  margin-bottom: 0;
-}
-
-.card-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.card-title .el-icon {
-  color: #667eea;
-}
-
-.form-tip {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
-}
-
-/* 命中率图表 */
-.hit-rate-chart {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 20px 0;
-  flex: 1;
-}
-
-.chart-ring {
-  margin-bottom: 24px;
-}
-
-.chart-center {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.chart-value {
-  font-size: 28px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.chart-label {
-  font-size: 14px;
-  color: #909399;
-}
-
-.chart-legend {
-  display: flex;
-  gap: 32px;
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.legend-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-}
-
-.legend-label {
-  font-size: 14px;
-  color: #606266;
-}
-
-.legend-value {
-  font-size: 14px;
-  font-weight: 600;
-  color: #303133;
-}
-
-/* 操作区域 */
-.operation-item {
-  display: flex;
-  gap: 16px;
-  padding: 20px;
-  background: #f8f9fa;
-  border-radius: 12px;
-  height: 100%;
-}
-
-.operation-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 24px;
-  flex-shrink: 0;
-}
-
-.operation-content {
-  flex: 1;
-}
-
-.operation-content h4 {
-  margin: 0 0 8px 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.operation-content p {
-  margin: 0 0 16px 0;
-  font-size: 13px;
-  color: #909399;
-}
-
-.operation-input {
-  max-width: 100%;
-}
-
-/* 响应式 */
 @media (max-width: 768px) {
-  .page-header {
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .stat-card {
-    padding: 16px;
-  }
-
-  .stat-value {
-    font-size: 20px;
-  }
-
-  .operation-item {
-    flex-direction: column;
-    text-align: center;
-  }
-
-  .operation-icon {
-    margin: 0 auto;
-  }
+  .page-header { flex-direction: column; gap: 16px; }
+  .stat-card { padding: 15px; }
+  .stat-value { font-size: 20px; }
+  .config-row { display: block; }
+  .config-row > .el-col { display: block; }
+  .operation-item { min-height: 0; }
+  .domain-cache-form { align-items: stretch; flex-direction: column; }
+}
+@media (max-width: 520px) {
+  .operation-item { flex-direction: column; }
+  .operation-content p { min-height: 0; }
 }
 </style>

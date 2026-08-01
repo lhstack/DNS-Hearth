@@ -1,32 +1,30 @@
 //! DNS Query Strategies
 //!
 //! Provides different strategies for querying upstream DNS servers:
-//! - Concurrent: Query all servers simultaneously, return first response
-//! - Fastest: Use the server with the best historical response time
+//! - Concurrent: Query all servers simultaneously, return the first NOERROR; otherwise NXDOMAIN
+//! - Fastest: Select the historically fastest healthy server and query it alone
 //! - RoundRobin: Rotate through servers sequentially
 //! - Random: Select a random server for each query
-
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
+use tokio::sync::{Mutex, RwLock};
 
 use super::client::{create_client, DnsClient, QueryResult};
 use super::upstream::{UpstreamManager, UpstreamServer};
-use crate::dns::message::DnsQuery;
-use std::collections::HashMap;
-use tokio::sync::Mutex;
+use crate::dns::message::{DnsQuery, DnsResponseCode};
 
 /// Query strategy types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryStrategy {
-    /// Query all servers simultaneously, return first response
+    /// Query all servers simultaneously, return the first NOERROR; otherwise NXDOMAIN
     Concurrent,
-    /// Use the server with the best historical response time
+    /// Select the historically fastest healthy server and query it alone
     Fastest,
     /// Rotate through servers sequentially
     RoundRobin,
@@ -180,157 +178,64 @@ impl ProxyManager {
         result
     }
 
-    /// Query all servers concurrently, return first successful response and cancel others
+    /// Query all healthy upstreams concurrently.
+    ///
+    /// The first NOERROR response wins immediately. NXDOMAIN responses are
+    /// retained as a fallback and returned only after every upstream finishes
+    /// without producing NOERROR.
     async fn query_concurrent(&self, query: &DnsQuery, trace_id: u64) -> Result<QueryResult> {
-        use crate::dns::message::DnsResponseCode;
-        use tokio::select;
-        use tokio_util::sync::CancellationToken;
-        use tracing::{debug, warn};
-
         let servers = self.healthy_servers_or_err().await?;
-
-        debug!(
-            trace_id,
-            server_count = servers.len(),
-            "Querying upstream servers concurrently"
-        );
-
-        // Create cancellation token for all tasks
-        let cancel_token = CancellationToken::new();
-        let mut handles = Vec::with_capacity(servers.len());
-
-        // Spawn concurrent queries to all servers
-        for server in servers.clone() {
-            let q = query.clone();
-            let tid = trace_id;
-            let server_name = server.name.clone();
-            let server_addr = server.address.clone();
-            let server_id = server.id;
-            let protocol = server.protocol;
-            let token = cancel_token.clone();
-
-            // Get client before spawning task to avoid capturing self.
-            // A client that cannot even be built is a configuration failure for
-            // this server, not for the query: skip it and let the others race.
-            let client = match self.get_client(&server).await {
-                Ok(c) => c,
-                Err(e) => {
-                    warn!(
-                        "[{}] [Concurrent] Skipping {}: {}",
-                        trace_id, server.name, e
-                    );
-                    self.upstream_manager.record_failure(server.id).await;
-                    continue;
-                }
-            };
-
-            // Every branch records its own outcome. A server that answered
-            // correctly but lost the race still gets credit, otherwise its
-            // latency sample would never update and the Fastest strategy
-            // could never see it.
-            let manager = self.upstream_manager.clone();
-
-            let handle = tokio::spawn(async move {
-                debug!(
-                    "[{}] [Concurrent] Starting query to {} ({}) via {}",
-                    tid, server_name, server_addr, protocol
-                );
-
-                select! {
-                    _ = token.cancelled() => {
-                        debug!("[{}] [Concurrent] Query to {} cancelled", tid, server_name);
-                        // Cancelled before answering: neither success nor failure.
-                        None
-                    }
-                    result = async {
-                        client.query(&q).await
-                    } => {
-                        match &result {
-                            Ok(r) => {
-                                debug!(
-                                    "[{}] [Concurrent] {} responded: {} in {}ms",
-                                    tid, server_name, r.response.response_code, r.response_time_ms
-                                );
-                                manager.record_success(server_id, r.response_time_ms).await;
-                            }
-                            Err(e) => {
-                                warn!("[{}] [Concurrent] {} failed: {}", tid, server_name, e);
-                                manager.record_failure(server_id).await;
-                            }
-                        }
-                        Some((server_id, result))
-                    }
-                }
-            });
-            handles.push(handle);
-        }
-
+        let mut tasks = self
+            .spawn_query_tasks(servers, query, trace_id, "Concurrent")
+            .await;
+        let mut fastest_nxdomain: Option<QueryResult> = None;
         let mut last_error: Option<String> = None;
 
-        // Use select to get the first successful response
-        loop {
-            if handles.is_empty() {
-                break;
-            }
-
-            // Wait for any task to complete
-            let (result, _index, remaining) = futures::future::select_all(handles).await;
-            handles = remaining;
-
-            // Outcomes are already recorded inside each task; this loop only
-            // picks the winner.
-            match result {
-                Ok(Some((_server_id, Ok(query_result)))) => {
-                    let response_code = &query_result.response.response_code;
-                    // Accept NoError and NxDomain as valid responses
-                    if *response_code == DnsResponseCode::NoError
-                        || *response_code == DnsResponseCode::NxDomain
+        while let Some(outcome) = tasks.join_next().await {
+            match outcome {
+                Ok(Ok(result)) if result.response.response_code == DnsResponseCode::NoError => {
+                    tracing::debug!(
+                        trace_id,
+                        server = %result.server_name,
+                        response_time_ms = result.response_time_ms,
+                        "Concurrent strategy selected first NOERROR"
+                    );
+                    tasks.abort_all();
+                    return Ok(result);
+                }
+                Ok(Ok(result)) if result.response.response_code == DnsResponseCode::NxDomain => {
+                    if fastest_nxdomain
+                        .as_ref()
+                        .is_none_or(|current| result.response_time_ms < current.response_time_ms)
                     {
-                        debug!(
-                            "[{}] [Concurrent] Winner: {} ({}ms) - {} answers, cancelling {} remaining queries",
-                            trace_id,
-                            query_result.server_name,
-                            query_result.response_time_ms,
-                            query_result.response.answers.len(),
-                            handles.len()
-                        );
-
-                        // Cancel all remaining queries
-                        cancel_token.cancel();
-                        return Ok(query_result);
-                    } else {
-                        last_error = Some(format!(
-                            "{} returned {}",
-                            query_result.server_name, response_code
-                        ));
-                        warn!(
-                            "[{}] [Concurrent] {} returned error: {}",
-                            trace_id, query_result.server_name, response_code
-                        );
+                        fastest_nxdomain = Some(result);
                     }
                 }
-                Ok(Some((_server_id, Err(e)))) => {
-                    last_error = Some(e.to_string());
+                Ok(Ok(result)) => {
+                    last_error = Some(format!(
+                        "{} returned {}",
+                        result.server_name, result.response.response_code
+                    ));
                 }
-                Ok(None) => {
-                    // Query was cancelled, don't count as failure
-                }
-                Err(e) => {
-                    last_error = Some(format!("Task panicked: {}", e));
+                Ok(Err(error)) => last_error = Some(error.to_string()),
+                Err(error) => {
+                    last_error = Some(format!("Task panicked: {}", error));
                 }
             }
         }
 
-        Err(anyhow!(
-            "All upstream servers failed: {}",
-            last_error.unwrap_or_else(|| "unknown error".to_string())
-        ))
+        fastest_nxdomain.ok_or_else(|| {
+            anyhow!(
+                "All upstream servers failed: {}",
+                last_error.unwrap_or_else(|| "no NOERROR or NXDOMAIN response".to_string())
+            )
+        })
     }
 
-    /// Query the single server with the best recorded latency.
+    /// Query the healthy upstream with the lowest historical successful latency.
     ///
-    /// Servers lacking a fresh latency sample are probed by the background
-    /// health checker, not by degrading this query into a concurrent fan-out.
+    /// Unlike `Concurrent`, this strategy sends the query to one upstream only.
+    /// A transport failure uses the existing single-server failover path.
     async fn query_fastest(&self, query: &DnsQuery, trace_id: u64) -> Result<QueryResult> {
         let server = self
             .upstream_manager
@@ -340,6 +245,96 @@ impl ProxyManager {
 
         self.log_selection("Fastest", trace_id, &server, None).await;
         self.query_server(server, query, trace_id).await
+    }
+
+    async fn spawn_query_tasks(
+        &self,
+        servers: Vec<UpstreamServer>,
+        query: &DnsQuery,
+        trace_id: u64,
+        strategy_label: &'static str,
+    ) -> tokio::task::JoinSet<Result<QueryResult>> {
+        let mut tasks = tokio::task::JoinSet::new();
+        for server in servers {
+            let client = match self.get_client(&server).await {
+                Ok(client) => client,
+                Err(error) => {
+                    tracing::warn!(
+                        trace_id,
+                        strategy = strategy_label,
+                        server = %server.name,
+                        %error,
+                        "Skipping invalid upstream client"
+                    );
+                    self.upstream_manager.record_failure(server.id).await;
+                    continue;
+                }
+            };
+            let manager = self.upstream_manager.clone();
+            let query = query.clone();
+            tasks.spawn(async move {
+                let outcome = client.query(&query).await;
+                match &outcome {
+                    Ok(result)
+                        if matches!(
+                            result.response.response_code,
+                            DnsResponseCode::NoError | DnsResponseCode::NxDomain
+                        ) =>
+                    {
+                        manager
+                            .record_success(result.server_id, result.response_time_ms)
+                            .await;
+                    }
+                    Ok(result) => {
+                        manager.record_failure(result.server_id).await;
+                    }
+                    Err(_) => {
+                        manager.record_failure(server.id).await;
+                    }
+                }
+                outcome
+            });
+        }
+        tasks
+    }
+
+    fn select_completed_result(outcomes: Vec<Result<QueryResult>>) -> Result<QueryResult> {
+        let mut fastest_noerror: Option<QueryResult> = None;
+        let mut fastest_nxdomain: Option<QueryResult> = None;
+        let mut last_error: Option<String> = None;
+        for outcome in outcomes {
+            match outcome {
+                Ok(result) if result.response.response_code == DnsResponseCode::NoError => {
+                    if fastest_noerror
+                        .as_ref()
+                        .is_none_or(|current| result.response_time_ms < current.response_time_ms)
+                    {
+                        fastest_noerror = Some(result);
+                    }
+                }
+                Ok(result) if result.response.response_code == DnsResponseCode::NxDomain => {
+                    if fastest_nxdomain
+                        .as_ref()
+                        .is_none_or(|current| result.response_time_ms < current.response_time_ms)
+                    {
+                        fastest_nxdomain = Some(result);
+                    }
+                }
+                Ok(result) => {
+                    last_error = Some(format!(
+                        "{} returned {}",
+                        result.server_name, result.response.response_code
+                    ));
+                }
+                Err(error) => last_error = Some(error.to_string()),
+            }
+        }
+        fastest_noerror.or(fastest_nxdomain).ok_or_else(|| {
+            anyhow!(
+                "All upstream servers failed: {}",
+                last_error.unwrap_or_else(|| "no NOERROR or NXDOMAIN response".to_string())
+            )
+        })
     }
 
     /// Query servers in round-robin fashion
@@ -500,7 +495,133 @@ impl ProxyManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dns::message::{DnsRecordData, DnsResponse, RecordType};
     use crate::dns::proxy::upstream::UpstreamProtocol;
+    use std::time::Duration;
+
+    struct StubDnsClient {
+        server: UpstreamServer,
+        response_code: DnsResponseCode,
+        has_answer: bool,
+        delay: Duration,
+    }
+
+    #[async_trait::async_trait]
+    impl DnsClient for StubDnsClient {
+        async fn query(&self, query: &DnsQuery) -> Result<QueryResult> {
+            tokio::time::sleep(self.delay).await;
+            let mut response = DnsResponse::new(query.id);
+            response.response_code = self.response_code;
+            if self.has_answer {
+                response.add_answer(DnsRecordData::a(
+                    &query.name,
+                    "192.0.2.1".parse().unwrap(),
+                    60,
+                ));
+            }
+            Ok(QueryResult {
+                response,
+                response_time_ms: self.delay.as_millis() as u64,
+                server_id: self.server.id,
+                server_name: self.server.name.clone(),
+            })
+        }
+
+        fn server(&self) -> &UpstreamServer {
+            &self.server
+        }
+
+        async fn health_check(&self) -> Result<Duration> {
+            Ok(self.delay)
+        }
+    }
+
+    fn stub_result(server_id: i64, code: DnsResponseCode, response_time_ms: u64) -> QueryResult {
+        let response = match code {
+            DnsResponseCode::NoError => DnsResponse::new(1),
+            DnsResponseCode::NxDomain => DnsResponse::nxdomain(1),
+            DnsResponseCode::ServFail => DnsResponse::servfail(1),
+            _ => {
+                let mut response = DnsResponse::new(1);
+                response.response_code = code;
+                response
+            }
+        };
+        QueryResult {
+            response,
+            response_time_ms,
+            server_id,
+            server_name: format!("Server {server_id}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fastest_uses_the_lowest_historical_latency_server_only() {
+        let slow = UpstreamServer::new(1, "Slow", "127.0.0.1:5301", UpstreamProtocol::Udp, 5000);
+        let fast = UpstreamServer::new(2, "Fast", "127.0.0.1:5302", UpstreamProtocol::Udp, 5000);
+        let upstream_manager = Arc::new(UpstreamManager::new());
+        upstream_manager.add_server(slow.clone()).await;
+        upstream_manager.add_server(fast.clone()).await;
+        upstream_manager.record_success(slow.id, 40).await;
+        upstream_manager.record_success(fast.id, 5).await;
+
+        let proxy_manager = ProxyManager::new(upstream_manager);
+        proxy_manager.set_strategy(QueryStrategy::Fastest).await;
+        let mut clients = proxy_manager.client_cache.lock().await;
+        clients.insert(
+            slow.clone(),
+            Arc::new(StubDnsClient {
+                server: slow,
+                response_code: DnsResponseCode::NoError,
+                has_answer: true,
+                delay: Duration::from_millis(40),
+            }),
+        );
+        clients.insert(
+            fast.clone(),
+            Arc::new(StubDnsClient {
+                server: fast,
+                response_code: DnsResponseCode::NoError,
+                has_answer: true,
+                delay: Duration::from_millis(5),
+            }),
+        );
+        drop(clients);
+
+        let result = proxy_manager
+            .query(&DnsQuery::new("example.com", RecordType::A))
+            .await
+            .expect("the selected historical fastest server should answer");
+        assert_eq!(result.server_id, 2);
+    }
+
+    #[test]
+    fn concurrent_prefers_noerror_then_nxdomain() {
+        let noerror = ProxyManager::select_completed_result(vec![
+            Ok(stub_result(1, DnsResponseCode::NxDomain, 1)),
+            Ok(stub_result(2, DnsResponseCode::NoError, 30)),
+            Ok(stub_result(3, DnsResponseCode::NoError, 10)),
+        ])
+        .expect("NOERROR should win");
+        assert_eq!(noerror.server_id, 3);
+
+        let nxdomain = ProxyManager::select_completed_result(vec![
+            Ok(stub_result(1, DnsResponseCode::ServFail, 1)),
+            Ok(stub_result(2, DnsResponseCode::NxDomain, 30)),
+            Ok(stub_result(3, DnsResponseCode::NxDomain, 10)),
+        ])
+        .expect("NXDOMAIN should be the fallback");
+        assert_eq!(nxdomain.server_id, 3);
+    }
+
+    #[test]
+    fn concurrent_errors_without_noerror_or_nxdomain() {
+        let result = ProxyManager::select_completed_result(vec![
+            Ok(stub_result(1, DnsResponseCode::ServFail, 1)),
+            Ok(stub_result(2, DnsResponseCode::Refused, 2)),
+        ]);
+        assert!(result.is_err());
+    }
 
     #[test]
     fn test_strategy_from_str() {

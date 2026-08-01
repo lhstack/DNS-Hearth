@@ -46,7 +46,7 @@
             @click="performQuery"
             :loading="querying"
             :disabled="!queryForm.domain"
-            class="query-btn"
+            class="query-btn primary-action"
           >
             <el-icon><Search /></el-icon>
             查询
@@ -280,10 +280,9 @@ async function performQuery() {
 
 /* 查询卡片 */
 .query-card {
-  border-radius: 12px;
-  border: none;
   margin-bottom: 24px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: 1px solid #e4e7ed;
+  background: #fff;
 }
 
 .query-card :deep(.el-card__body) {
@@ -299,13 +298,13 @@ async function performQuery() {
 .query-icon {
   width: 64px;
   height: 64px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 16px;
+  background: #ecf5ff;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  font-size: 32px;
+  color: #409eff;
+  font-size: 30px;
   flex-shrink: 0;
 }
 
@@ -321,8 +320,8 @@ async function performQuery() {
 }
 
 .domain-input :deep(.el-input__wrapper) {
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 8px;
+  background: #fff;
+  border-radius: 4px;
 }
 
 .type-select {
@@ -330,8 +329,8 @@ async function performQuery() {
 }
 
 .type-select :deep(.el-input__wrapper) {
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 8px;
+  background: #fff;
+  border-radius: 4px;
 }
 
 .query-btn {
@@ -363,7 +362,7 @@ async function performQuery() {
 }
 
 .result-title .el-icon {
-  color: #667eea;
+  color: #409eff;
 }
 
 .result-tags {
@@ -379,7 +378,7 @@ async function performQuery() {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
   padding: 20px;
-  background: #f8f9fa;
+  background: #f5f7fa;
   border-radius: 8px;
   margin-bottom: 24px;
 }
@@ -403,7 +402,7 @@ async function performQuery() {
 
 .metadata-value.domain {
   font-family: 'Monaco', 'Menlo', monospace;
-  color: #667eea;
+  color: #409eff;
 }
 
 /* 记录区域 */
@@ -422,11 +421,11 @@ async function performQuery() {
 }
 
 .section-title .el-icon {
-  color: #667eea;
+  color: #409eff;
 }
 
 .records-table :deep(.el-table__header th) {
-  background: #f8f9fa;
+  background: #f5f7fa;
   color: #606266;
   font-weight: 600;
 }
@@ -470,12 +469,12 @@ async function performQuery() {
 .tips-icon {
   width: 48px;
   height: 48px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 12px;
+  background: #ecf5ff;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: #409eff;
   font-size: 24px;
   flex-shrink: 0;
 }

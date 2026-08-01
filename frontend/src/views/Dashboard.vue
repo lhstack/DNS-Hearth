@@ -102,7 +102,15 @@
             <el-option v-for="server in service.preset_servers" :key="server" :label="server" :value="server" />
           </el-select>
           <div class="quick-actions">
-            <el-button size="small" text type="primary" @click="prependLocalDns(service)">加入本地 DNS 127.0.0.1</el-button>
+            <el-button
+              size="small"
+              text
+              type="primary"
+              :disabled="service.preset_servers.includes('127.0.0.1')"
+              @click="prependLocalDns(service)"
+            >
+              {{ service.preset_servers.includes('127.0.0.1') ? '已加入本地 DNS' : '加入本地 DNS 127.0.0.1' }}
+            </el-button>
             <el-button size="small" text @click="useCurrentDns(service)">使用当前 DNS</el-button>
           </div>
         </div>
@@ -297,44 +305,34 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.home-page { max-width: 1180px; margin: 0 auto; padding-bottom: 96px; }
+.home-page { max-width: 1160px; margin: 0 auto; padding-bottom: 96px; }
 .page-header, .card-header, .service-summary { display: flex; justify-content: space-between; align-items: center; gap: 18px; }
-.page-header { margin-bottom: 22px; }
-h1 { margin: 0 0 8px; font-size: 28px; }
+.page-header { align-items: flex-start; }
 .page-header p, .card-subtitle, .current-dns { margin: 0; color: var(--el-text-color-secondary); }
-.section-card { margin-bottom: 20px; border-radius: 12px; }
+.section-card { margin-bottom: 20px; border-radius: 6px !important; }
+.section-card :deep(.el-card__header) { background: #fff; }
 .section-gap { margin-bottom: 20px; }
-.card-title { font-size: 17px; font-weight: 650; margin-bottom: 5px; }
-.interval-control { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-.service-list { display: grid; gap: 14px; }
-.service-row { border: 1px solid var(--el-border-color-lighter); border-radius: 10px; padding: 16px; background: var(--el-fill-color-blank); }
+.card-title { margin-bottom: 5px; font-size: 17px; font-weight: 650; }
+.interval-control { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--dns-line); border-radius: 11px; color: var(--dns-muted); background: rgba(255,253,250,.76); white-space: nowrap; }
+.service-list { display: grid; gap: 12px; }
+.service-row { position: relative; overflow: hidden; padding: 16px; border: 1px solid var(--dns-line); border-radius: 6px; background: #fff; transition: border-color .2s ease, transform .2s ease, box-shadow .2s ease; }
+.service-row::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: #409eff; }
+.service-row:hover { transform: translateY(-1px); border-color: #a0cfff; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
 .service-summary { margin-bottom: 12px; }
-.service-name { font-weight: 650; font-size: 16px; margin-bottom: 4px; }
+.service-name { margin-bottom: 4px; color: var(--dns-ink); font-size: 16px; font-weight: 650; letter-spacing: -.015em; }
 .current-dns { font-size: 13px; }
 .service-state, .quick-actions { display: flex; align-items: center; gap: 10px; }
-.quick-actions { margin-top: 6px; }
-.apply-status { position: fixed; z-index: 20; left: 260px; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; gap: 9px; padding: 10px 24px; color: var(--el-text-color-secondary); font-size: 12px; background: rgba(255,255,255,.94); border-top: 1px solid var(--el-border-color-light); backdrop-filter: blur(12px); }
-.apply-dot { width: 7px; height: 7px; border-radius: 50%; background: #9aa7a5; }
-.apply-dot.active { background: #d96842; box-shadow: 0 0 0 4px rgba(217,104,66,.12); }
-.apply-dot.error { background: #d94f4f; }
+.quick-actions { min-height: 28px; margin-top: 7px; }
+.quick-actions :deep(.el-button) { margin-left: 0; }
+.quick-actions :deep(.el-button.is-disabled) { padding-inline: 10px; }
+.apply-status { position: fixed; z-index: 20; left: 248px; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; gap: 9px; padding: 10px 24px; color: var(--dns-muted); font-size: 12px; background: rgba(255,255,255,.96); border-top: 1px solid var(--dns-line); box-shadow: 0 -2px 8px rgba(0,0,0,.06); }
+.apply-dot { width: 7px; height: 7px; border-radius: 50%; background: #b3a49d; }
+.apply-dot.active { background: var(--dns-primary); box-shadow: 0 0 0 4px rgba(64,158,255,.12); }
+.apply-dot.error { background: var(--dns-danger); }
 @media (max-width: 767px) {
   .page-header, .card-header, .service-summary { align-items: flex-start; flex-direction: column; }
   .service-state { width: 100%; justify-content: space-between; }
+  .quick-actions { align-items: flex-start; flex-direction: column; }
   .apply-status { left: 0; }
 }
-</style>
-
-<style scoped>
-.home-page { max-width: 1160px; }
-.page-header { align-items: flex-start; }
-.section-card { border-radius: 16px !important; }
-.section-card :deep(.el-card__header) { background: linear-gradient(90deg, rgba(230,246,244,.64), rgba(255,255,255,.18)); }
-.service-list { gap: 12px; }
-.service-row { position: relative; overflow: hidden; border-color: #eee0d5; border-radius: 12px; background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(246,251,250,.94)); transition: border-color .2s ease, transform .2s ease, box-shadow .2s ease; }
-.service-row::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: #efd0b8; }
-.service-row:hover { transform: translateY(-1px); border-color: #ebc8af; box-shadow: 0 12px 28px rgba(17,75,76,.07); }
-.service-name { color: #442d2a; letter-spacing: -.015em; }
-.interval-control { padding: 7px 10px; border: 1px solid #eee0d5; border-radius: 10px; color: #5b737b; background: rgba(255,255,255,.75); }
-.apply-status { left: 248px; border-top-color: #ead8ca; background: rgba(247,251,250,.92); box-shadow: 0 -12px 36px rgba(17,55,60,.06); }
-@media (max-width: 767px) { .apply-status { left: 0; } }
 </style>

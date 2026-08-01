@@ -14,9 +14,23 @@ DNS Hearth 是一款面向 macOS 的本地 DNS 管理与转发工具，主要用
 - 支持本地 DNS 记录、域名重写和域名拦截；
 - 支持 UDP、DoT、DoH、DoQ、DoH3 等上游协议；
 - 支持并发、最快响应、轮询和随机查询策略；
+- “并发查询”同时请求所有健康上游，最快返回 `NOERROR` 时立即返回；如果没有 `NOERROR`，等待所有上游结束后返回最快的 `NXDOMAIN`；
+- “最快响应”根据历史成功查询延迟选择最低延迟的健康上游，只向该上游发送查询；
 - 提供 DNS 缓存管理、查询测试、查询日志和上游健康状态；
 - 使用 SQLite 持久化配置与查询记录；
-- 单实例运行，避免多个应用实例争用本地 DNS 端口。
+- 单实例运行，避免多个应用实例争用本地 DNS 端口；
+- 使用 Element Plus 默认设计语言：标准蓝色主操作、白色卡片、浅灰页面背景和清晰的状态色，并统一卡片、表单、按钮与表格样式；
+- 业务页面使用 Element Plus 按钮、输入框和图标组件，侧边栏折叠禁用重复过渡，避免文字残留和图标背景遮挡。
+
+## DNS 查询策略与缓存
+
+“并发查询”会同时请求所有健康上游，收到最快的 `NOERROR` 后立即返回；如果没有任何 `NOERROR`，则等待所有上游完成并返回最快的 `NXDOMAIN`。如果两类有效结论都没有收到，返回明确的上游失败，不伪造 DNS 结果。
+
+“最快响应”不会并发广播查询，而是根据历史成功查询延迟选择最低延迟的健康上游，只向该上游发送本次查询并返回结果；该上游发生传输失败时，沿用单上游故障转移路径。首次启动且没有保存过查询策略时默认使用“并发查询”；已有用户保存的策略不会被覆盖。
+
+缓存遵守上游 DNS 响应中的最小 TTL。缓存页面配置的默认 TTL 只用于没有 Answer 记录、无法从 Answer 获取 TTL 的响应，不会强制把所有域名缓存为该时长。这样可以避免 CDN 或 GSLB 地址变化后继续返回过期地址。
+
+缓存命中后，界面查询日志会标记“缓存”为“是”，响应不会再显示上游服务器名称。不同域名、记录类型和上游 TTL 不同，命中率会有所差异；上游 TTL 较短的域名在 TTL 过期后重新查询属于正常行为。
 
 ## 技术栈
 
@@ -29,11 +43,16 @@ DNS Hearth 是一款面向 macOS 的本地 DNS 管理与转发工具，主要用
 
 ## macOS 安装
 
+当前发布包为 Universal 2，同一个 DMG 同时支持：
+
+- Intel Mac：`x86_64`；
+- Apple Silicon：`arm64`，包括 M1、M2、M3、M4 及后续兼容机型。
+
 构建产物默认位于：
 
 ```text
-src-tauri/target/release/bundle/macos/DNS Hearth.app
-src-tauri/target/release/bundle/dmg/DNS Hearth_0.0.2_aarch64.dmg
+src-tauri/target/universal-apple-darwin/release/bundle/macos/DNS Hearth.app
+src-tauri/target/universal-apple-darwin/release/bundle/dmg/DNS Hearth_0.0.2_universal.dmg
 ```
 
 安装步骤：
@@ -249,19 +268,19 @@ npm --prefix frontend run build
 
 ## 构建 macOS 应用
 
-生成 `.app` 和 `.dmg`：
+生成同时支持 Intel Mac 和 Apple Silicon 的 Universal 2 `.app` 与 `.dmg`：
 
 ```bash
-npx tauri build --bundles app,dmg
+npm exec -- tauri build --target universal-apple-darwin --bundles app dmg
 ```
 
-默认产物目录：
+Universal 2 产物目录：
 
 ```text
-src-tauri/target/release/bundle/
+src-tauri/target/universal-apple-darwin/release/bundle/
 ```
 
-当前配置会生成运行构建命令所在 Rust 目标架构的安装包。在 Apple Silicon Mac 上默认生成 arm64/aarch64 版本。
+该构建会分别编译 `x86_64-apple-darwin` 和 `aarch64-apple-darwin`，再合并为包含 `x86_64 arm64` 的 Universal 2 主程序。
 
 正式向其他用户分发前，应配置 Apple Developer ID 签名并完成 notarization。ad-hoc 签名只适合本机开发、测试或可信环境中的手动安装。
 

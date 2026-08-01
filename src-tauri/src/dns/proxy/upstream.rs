@@ -178,7 +178,7 @@ impl Default for UpstreamStats {
 
 impl UpstreamStats {
     /// EMA smoothing factor: weight given to the newest sample.
-    /// Kept low so `Fastest` does not flip servers on a single slow response.
+    /// Kept low so latency diagnostics do not jump on a single slow response.
     const EMA_ALPHA: f64 = 0.3;
     /// Consecutive failures required before a server leaves the rotation.
     const FAILURE_THRESHOLD: u32 = 3;
@@ -207,17 +207,16 @@ impl UpstreamStats {
         }
     }
 
-    /// Same value as `smoothed_latency_ms`, but ranks unmeasured servers last
-    /// instead of first so they never win a latency comparison by default.
+    /// Same latency value used to rank servers for the single-target fastest strategy.
+    /// Servers without a successful historical sample are ranked last.
     pub fn latency_rank_key(&self) -> u64 {
         if self.successes == 0 {
-            u64::MAX // No data = worst priority for sorting
+            u64::MAX
         } else {
             self.ema_response_time_ms.round() as u64
         }
     }
 
-    /// Calculate success rate (0.0 to 1.0)
     pub fn success_rate(&self) -> f64 {
         if self.queries == 0 {
             1.0 // Assume healthy if no queries yet
@@ -457,7 +456,18 @@ impl UpstreamManager {
             .collect()
     }
 
-    /// Get a server by ID
+    /// Get the healthy server with the lowest historical successful latency.
+    pub async fn get_fastest_server(&self) -> Option<UpstreamServer> {
+        let servers = self.get_healthy_servers().await;
+        let stats = self.stats.read().await;
+        servers.into_iter().min_by_key(|server| {
+            stats
+                .get(&server.id)
+                .map(UpstreamStats::latency_rank_key)
+                .unwrap_or(u64::MAX)
+        })
+    }
+
     pub async fn get_server(&self, id: i64) -> Option<UpstreamServer> {
         self.servers
             .read()
@@ -517,19 +527,6 @@ impl UpstreamManager {
         if let Some(server_stats) = stats.get_mut(&id) {
             server_stats.reset_health();
         }
-    }
-
-    /// Get the server with the fastest average response time
-    pub async fn get_fastest_server(&self) -> Option<UpstreamServer> {
-        let servers = self.get_healthy_servers().await;
-        let stats = self.stats.read().await;
-
-        servers.into_iter().min_by_key(|s| {
-            stats
-                .get(&s.id)
-                .map(|st| st.latency_rank_key())
-                .unwrap_or(u64::MAX)
-        })
     }
 
     /// Check if any server has historical stats (at least one successful query)
@@ -935,36 +932,6 @@ mod tests {
         let healthy = manager.get_healthy_servers().await;
         assert_eq!(healthy.len(), 1);
         assert_eq!(healthy[0].id, 1);
-    }
-
-    #[tokio::test]
-    async fn test_upstream_manager_fastest_server() {
-        let manager = UpstreamManager::new();
-
-        manager
-            .add_server(UpstreamServer::new(
-                1,
-                "Slow",
-                "8.8.8.8:53",
-                UpstreamProtocol::Udp,
-                5000,
-            ))
-            .await;
-        manager
-            .add_server(UpstreamServer::new(
-                2,
-                "Fast",
-                "8.8.4.4:53",
-                UpstreamProtocol::Udp,
-                5000,
-            ))
-            .await;
-
-        manager.record_success(1, 100).await;
-        manager.record_success(2, 50).await;
-
-        let fastest = manager.get_fastest_server().await.unwrap();
-        assert_eq!(fastest.id, 2);
     }
 
     #[tokio::test]

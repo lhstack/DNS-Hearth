@@ -88,7 +88,7 @@ onUnmounted(() => {
 
 .card-icon {
   font-size: 18px;
-  color: #11998e;  /* Different color for clients */
+  color: #67c23a;  /* Different color for clients */
 }
 
 .list-container {
@@ -156,7 +156,7 @@ onUnmounted(() => {
 
 .bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #11998e 0%, #38ef7d 100%); /* Green gradient */
+  background: #67c23a; /* Green gradient */
   border-radius: 3px;
 }
 

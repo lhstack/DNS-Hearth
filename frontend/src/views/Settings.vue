@@ -16,7 +16,7 @@
     <el-row :gutter="20" class="stats-row">
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+          <div class="stat-icon" style="background: #409eff;">
             <el-icon><Timer /></el-icon>
           </div>
           <div class="stat-info">
@@ -27,7 +27,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);">
+          <div class="stat-icon" style="background: #67c23a;">
             <el-icon><DataAnalysis /></el-icon>
           </div>
           <div class="stat-info">
@@ -38,7 +38,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);">
+          <div class="stat-icon" style="background: #f56c6c;">
             <el-icon><Box /></el-icon>
           </div>
           <div class="stat-info">
@@ -49,7 +49,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+          <div class="stat-icon" style="background: #e6a23c;">
             <el-icon><Connection /></el-icon>
           </div>
           <div class="stat-info">
@@ -105,7 +105,7 @@
               @click="saveStrategy"
               :loading="savingStrategy"
               :disabled="selectedStrategy === currentStrategy.strategy"
-              class="save-btn"
+              class="save-btn primary-action"
             >
               <el-icon><Check /></el-icon>
               保存策略
@@ -324,7 +324,7 @@
           <div v-loading="loadingHealth">
             <div class="health-list">
               <div class="health-item" :class="{ 'is-healthy': health.database }">
-                <div class="health-icon" :style="{ background: health.database ? 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)' : 'linear-gradient(135deg, #f5576c 0%, #f093fb 100%)' }">
+                <div class="health-icon" :style="{ background: health.database ? '#67c23a' : '#f56c6c' }">
                   <el-icon><Coin /></el-icon>
                 </div>
                 <div class="health-info">
@@ -339,7 +339,7 @@
                 </el-icon>
               </div>
               <div class="health-item" :class="{ 'is-healthy': health.cache }">
-                <div class="health-icon" :style="{ background: health.cache ? 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)' : 'linear-gradient(135deg, #f5576c 0%, #f093fb 100%)' }">
+                <div class="health-icon" :style="{ background: health.cache ? '#67c23a' : '#f56c6c' }">
                   <el-icon><Box /></el-icon>
                 </div>
                 <div class="health-info">
@@ -354,7 +354,7 @@
                 </el-icon>
               </div>
               <div class="health-item" :class="{ 'is-healthy': health.upstreams }">
-                <div class="health-icon" :style="{ background: health.upstreams ? 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)' : 'linear-gradient(135deg, #f5576c 0%, #f093fb 100%)' }">
+                <div class="health-icon" :style="{ background: health.upstreams ? '#67c23a' : '#f56c6c' }">
                   <el-icon><Connection /></el-icon>
                 </div>
                 <div class="health-info">
@@ -933,7 +933,7 @@ onMounted(() => {
 }
 
 .card-title .el-icon {
-  color: #667eea;
+  color: #409eff;
 }
 
 /* 策略卡片 */
@@ -954,7 +954,7 @@ onMounted(() => {
   color: #606266;
   margin: 0 0 16px 0;
   padding: 12px;
-  background: #f8f9fa;
+  background: #f5f7fa;
   border-radius: 8px;
 }
 
@@ -967,7 +967,7 @@ onMounted(() => {
   align-items: flex-start;
   gap: 12px;
   padding: 10px 16px;
-  background: #f8f9fa;
+  background: #f5f7fa;
   border-radius: 8px;
   margin-bottom: 6px;
   cursor: pointer;
@@ -1016,7 +1016,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  background: #f8f9fa;
+  background: #f5f7fa;
   border-radius: 8px;
 }
 
@@ -1032,7 +1032,7 @@ onMounted(() => {
 }
 
 .status-value.highlight {
-  color: #667eea;
+  color: #409eff;
   font-size: 16px;
 }
 
@@ -1048,7 +1048,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  background: #f8f9fa;
+  background: #f5f7fa;
   border-radius: 8px;
   transition: all 0.3s;
 }
@@ -1085,7 +1085,7 @@ onMounted(() => {
   align-items: center;
   gap: 16px;
   padding: 16px;
-  background: #f8f9fa;
+  background: #f5f7fa;
   border-radius: 12px;
   transition: all 0.3s;
   border: 2px solid transparent;
@@ -1197,7 +1197,7 @@ onMounted(() => {
 
 .cleanup-section {
   padding: 16px;
-  background: #f8f9fa;
+  background: #f5f7fa;
   border-radius: 12px;
   height: 100%;
 }

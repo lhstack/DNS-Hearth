@@ -16,7 +16,7 @@
     <el-row :gutter="20" class="stats-row">
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+          <div class="stat-icon" style="background: #409eff;">
             <el-icon><DataAnalysis /></el-icon>
           </div>
           <div class="stat-info">
@@ -27,7 +27,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);">
+          <div class="stat-icon" style="background: #67c23a;">
             <el-icon><Calendar /></el-icon>
           </div>
           <div class="stat-info">
@@ -38,7 +38,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #f5576c 0%, #f093fb 100%);">
+          <div class="stat-icon" style="background: #f56c6c;">
             <el-icon><CircleCheck /></el-icon>
           </div>
           <div class="stat-info">
@@ -49,7 +49,7 @@
       </el-col>
       <el-col :xs="12" :sm="6">
         <div class="stat-card">
-          <div class="stat-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+          <div class="stat-icon" style="background: #e6a23c;">
             <el-icon><TrendCharts /></el-icon>
           </div>
           <div class="stat-info">
@@ -546,7 +546,7 @@ onMounted(() => {
 }
 
 .custom-table :deep(.el-table__header th) {
-  background: #f8f9fa;
+  background: #f5f7fa;
   color: #606266;
   font-weight: 600;
 }
