@@ -70,8 +70,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import {
   Odometer, Document, Edit, Connection, Coin,
   Search, List, Setting, Expand, Fold
@@ -82,6 +84,7 @@ const route = useRoute()
 const { isMobile, isCollapse } = useResponsive()
 const mobileMenuVisible = ref(false)
 const activeMenu = computed(() => route.path)
+const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
 const menuItems = [
   { path: '/', label: '首页', icon: Odometer },
@@ -100,6 +103,27 @@ function toggleMenu() {
   if (isMobile.value) mobileMenuVisible.value = !mobileMenuVisible.value
   else isCollapse.value = !isCollapse.value
 }
+
+let unlistenExitCleanupFailure: UnlistenFn | undefined
+let disposed = false
+
+onMounted(async () => {
+  if (!isTauri) return
+  try {
+    const unlisten = await listen<string>('dns-exit-cleanup-failed', event => {
+      ElMessage.error(`退出前清空 DNS 失败：${event.payload}`)
+    })
+    if (disposed) unlisten()
+    else unlistenExitCleanupFailure = unlisten
+  } catch (error) {
+    ElMessage.error(`注册退出清理通知失败：${error instanceof Error ? error.message : String(error)}`)
+  }
+})
+
+onUnmounted(() => {
+  disposed = true
+  unlistenExitCleanupFailure?.()
+})
 </script>
 
 <style scoped>

@@ -1164,11 +1164,14 @@ impl DnsClient for Doh3DnsClient {
         use tracing::debug;
 
         let (sni_host, host, port, path) = self.parse_url()?;
-        let addr = self.resolve_address(&host, port).await?;
+        let addr = self
+            .resolve_address(&host, port)
+            .await
+            .map_err(|error| anyhow!("DoH3 地址解析失败 ({}): {}", host, error))?;
 
         debug!(
-            "DoH3 connecting to {} (SNI: {}, path: {})",
-            addr, sni_host, path
+            "DoH3 connecting to {} (SNI: {}, host: {}, path: {})",
+            addr, sni_host, host, path
         );
 
         let idx = self.index.fetch_add(1, Ordering::Relaxed) % ENDPOINT_POOL_SIZE;
@@ -1217,10 +1220,20 @@ impl DnsClient for Doh3DnsClient {
                     debug!("DoH3 creating new connection to {} (slot {})", addr, idx);
 
                     // Create new QUIC connection
-                    let connection =
-                        timeout(self.server.timeout, endpoint.connect(addr, connect_sni)?)
-                            .await
-                            .map_err(|_| anyhow!("Connection timeout"))??;
+                    let connecting = endpoint
+                        .connect(addr, connect_sni)
+                        .map_err(|error| anyhow!("DoH3 连接初始化失败: {}", error))?;
+                    let connection = timeout(self.server.timeout, connecting)
+                        .await
+                        .map_err(|_| {
+                            anyhow!(
+                                "DoH3 QUIC 连接超时: {} (SNI: {}, 地址: {})",
+                                self.server.name,
+                                sni_host,
+                                addr
+                            )
+                        })?
+                        .map_err(|error| anyhow!("DoH3 QUIC 握手失败: {}", error))?;
 
                     debug!("DoH3 QUIC connection established (slot {})", idx);
 
@@ -1656,6 +1669,12 @@ mod tests {
         assert_eq!(
             (host.as_str(), port, path.as_str()),
             ("dns.google", 8443, "/dns-query")
+        );
+
+        let (sni, host, port, path) = parse("https://dns.alidns.com/dns-query");
+        assert_eq!(
+            (sni.as_str(), host.as_str(), port, path.as_str()),
+            ("dns.alidns.com", "dns.alidns.com", 443, "/dns-query")
         );
     }
 

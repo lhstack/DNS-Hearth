@@ -78,6 +78,16 @@
                 {{ service.matches_preset ? '符合预设' : '等待校正' }}
               </el-tag>
               <el-switch v-model="service.enabled" active-text="监听" inactive-text="忽略" />
+              <el-button
+                v-if="!service.enabled"
+                size="small"
+                text
+                type="warning"
+                :loading="clearingService === service.service"
+                @click="clearDns(service)"
+              >
+                <el-icon><Delete /></el-icon>清空 DNS
+              </el-button>
             </div>
           </div>
           <el-select
@@ -99,25 +109,22 @@
       </div>
     </el-card>
 
-    <div class="save-bar">
-      <div class="save-tip">保存顺序：启动/停止 UDP 监听 → 持久化各网络服务 DNS → 立即校正。</div>
-      <div class="save-action">
-        <el-button v-if="saving" size="large" @click="cancelSave">取消</el-button>
-        <el-button type="primary" size="large" :loading="saving" :disabled="!isTauri" @click="saveAll">
-          {{ saving ? saveStage : '保存并立即应用' }}
-        </el-button>
-      </div>
+    <div class="apply-status" role="status" aria-live="polite">
+      <span :class="['apply-dot', { active: saving, error: applyError }]" />
+      <span>{{ applyError || (saving ? saveStage : '配置会自动生效') }}</span>
+      <el-button v-if="saving" size="small" text @click="cancelSave">取消</el-button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Delete, Refresh } from '@element-plus/icons-vue'
 import api from '../api'
 import {
   applyHomeConfiguration,
+  clearNetworkServiceDns,
   getNetworkServices,
   getSystemDnsConfig,
   type NetworkServiceDns,
@@ -134,9 +141,12 @@ const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 const loading = ref(false)
 const saving = ref(false)
 const saveStage = ref('正在应用…')
+const applyError = ref('')
 let saveAttempt = 0
+let applyTimer: number | undefined
 const checkInterval = ref(30)
 const services = ref<NetworkServiceDns[]>([])
+const clearingService = ref('')
 const udp = reactive({ enabled: false, bind_address: '127.0.0.1', port: 53 })
 
 function messageOf(error: unknown): string {
@@ -177,6 +187,30 @@ function useCurrentDns(service: NetworkServiceDns) {
   service.enabled = true
 }
 
+async function clearDns(service: NetworkServiceDns) {
+  try {
+    await ElMessageBox.confirm(
+      `确定清空“${service.service}”当前已设置的系统 DNS 吗？这不会删除保存的 DNS 预设。`,
+      '清空系统 DNS',
+      { confirmButtonText: '清空', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error(messageOf(error))
+    return
+  }
+
+  clearingService.value = service.service
+  try {
+    const cleared = await clearNetworkServiceDns(service.service)
+    Object.assign(service, cleared)
+    ElMessage.success(`已清空“${service.service}”的系统 DNS`)
+  } catch (error) {
+    ElMessage.error(messageOf(error))
+  } finally {
+    clearingService.value = ''
+  }
+}
+
 function buildBindings() {
   return services.value.map(service => ({
     service: service.service,
@@ -185,9 +219,19 @@ function buildBindings() {
   }))
 }
 
-async function saveAll() {
+function scheduleApply() {
+  if (!isTauri || loading.value) return
+  if (applyTimer !== undefined) window.clearTimeout(applyTimer)
+  applyTimer = window.setTimeout(() => {
+    applyTimer = undefined
+    void applyConfiguration()
+  }, 500)
+}
+
+async function applyConfiguration() {
   const attempt = ++saveAttempt
   saving.value = true
+  applyError.value = ''
   saveStage.value = udp.enabled && udp.port === 53 ? '正在启动 DNS 服务…' : '正在应用配置…'
   try {
     const result = await Promise.race([
@@ -205,11 +249,11 @@ async function saveAll() {
     if (attempt !== saveAttempt) return
     services.value = result.services
     Object.assign(udp, result.udp_listener)
-    ElMessage.success('UDP 监听与各网络服务 DNS 已应用')
+    ElMessage.success('配置已自动应用')
   } catch (error) {
     if (attempt !== saveAttempt) return
-    ElMessage.error(messageOf(error))
-    await loadConfiguration()
+    applyError.value = messageOf(error)
+    ElMessage.error(applyError.value)
   } finally {
     if (attempt === saveAttempt) saving.value = false
   }
@@ -217,20 +261,37 @@ async function saveAll() {
 
 function cancelSave() {
   saveAttempt += 1
+  if (applyTimer !== undefined) {
+    window.clearTimeout(applyTimer)
+    applyTimer = undefined
+  }
   saving.value = false
   saveStage.value = '正在应用…'
-  ElMessage.info('已停止等待当前操作结果')
+  ElMessage.info('已取消等待中的自动应用')
 }
 
-onMounted(loadConfiguration)
+onMounted(() => {
+  void loadConfiguration()
+})
+
+watch([checkInterval, () => udp.enabled, () => udp.bind_address, () => udp.port], scheduleApply)
+watch(
+  () => services.value.map(service => `${service.service}|${service.enabled}|${service.preset_servers.join(',')}`).join('\n'),
+  scheduleApply,
+)
+
+onUnmounted(() => {
+  if (applyTimer !== undefined) window.clearTimeout(applyTimer)
+})
+
 </script>
 
 <style scoped>
 .home-page { max-width: 1180px; margin: 0 auto; padding-bottom: 96px; }
-.page-header, .card-header, .service-summary, .save-bar { display: flex; justify-content: space-between; align-items: center; gap: 18px; }
+.page-header, .card-header, .service-summary { display: flex; justify-content: space-between; align-items: center; gap: 18px; }
 .page-header { margin-bottom: 22px; }
 h1 { margin: 0 0 8px; font-size: 28px; }
-.page-header p, .card-subtitle, .current-dns, .save-tip { margin: 0; color: var(--el-text-color-secondary); }
+.page-header p, .card-subtitle, .current-dns { margin: 0; color: var(--el-text-color-secondary); }
 .section-card { margin-bottom: 20px; border-radius: 12px; }
 .section-gap { margin-bottom: 20px; }
 .card-title { font-size: 17px; font-weight: 650; margin-bottom: 5px; }
@@ -242,11 +303,14 @@ h1 { margin: 0 0 8px; font-size: 28px; }
 .current-dns { font-size: 13px; }
 .service-state, .quick-actions { display: flex; align-items: center; gap: 10px; }
 .quick-actions { margin-top: 6px; }
-.save-bar { position: fixed; z-index: 20; left: 260px; right: 0; bottom: 0; padding: 14px max(24px, calc((100vw - 1440px) / 2)); background: rgba(255,255,255,.94); border-top: 1px solid var(--el-border-color-light); backdrop-filter: blur(12px); }
+.apply-status { position: fixed; z-index: 20; left: 260px; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; gap: 9px; padding: 10px 24px; color: var(--el-text-color-secondary); font-size: 12px; background: rgba(255,255,255,.94); border-top: 1px solid var(--el-border-color-light); backdrop-filter: blur(12px); }
+.apply-dot { width: 7px; height: 7px; border-radius: 50%; background: #9aa7a5; }
+.apply-dot.active { background: #d96842; box-shadow: 0 0 0 4px rgba(217,104,66,.12); }
+.apply-dot.error { background: #d94f4f; }
 @media (max-width: 767px) {
   .page-header, .card-header, .service-summary { align-items: flex-start; flex-direction: column; }
   .service-state { width: 100%; justify-content: space-between; }
-  .save-bar { left: 0; flex-direction: column; align-items: stretch; }
+  .apply-status { left: 0; }
 }
 </style>
 
@@ -261,7 +325,6 @@ h1 { margin: 0 0 8px; font-size: 28px; }
 .service-row:hover { transform: translateY(-1px); border-color: #ebc8af; box-shadow: 0 12px 28px rgba(17,75,76,.07); }
 .service-name { color: #442d2a; letter-spacing: -.015em; }
 .interval-control { padding: 7px 10px; border: 1px solid #eee0d5; border-radius: 10px; color: #5b737b; background: rgba(255,255,255,.75); }
-.save-action { display: flex; gap: 10px; }
-.save-bar { left: 248px; border-top-color: #ead8ca; background: rgba(247,251,250,.92); box-shadow: 0 -12px 36px rgba(17,55,60,.06); }
-@media (max-width: 767px) { .save-bar { left: 0; } }
+.apply-status { left: 248px; border-top-color: #ead8ca; background: rgba(247,251,250,.92); box-shadow: 0 -12px 36px rgba(17,55,60,.06); }
+@media (max-width: 767px) { .apply-status { left: 0; } }
 </style>

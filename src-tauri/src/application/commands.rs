@@ -83,6 +83,18 @@ pub async fn enforce_system_dns(state: State<'_, AppState>) -> Result<Value, Com
     serde_json::to_value(state.system_dns.enforce_once().await.map_err(failure)?).map_err(failure)
 }
 
+#[tauri::command]
+pub async fn clear_network_service_dns(
+    state: State<'_, AppState>,
+    service: String,
+) -> Result<NetworkServiceDns, CommandFailure> {
+    state
+        .system_dns
+        .clear_service(&service)
+        .await
+        .map_err(failure)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct HomeConfiguration {
     pub system_dns: SystemDnsConfig,

@@ -54,6 +54,10 @@ export async function enforceSystemDns(): Promise<NetworkServiceDns[]> {
   return invoke<NetworkServiceDns[]>('enforce_system_dns')
 }
 
+export async function clearNetworkServiceDns(service: string): Promise<NetworkServiceDns> {
+  return invoke<NetworkServiceDns>('clear_network_service_dns', { service })
+}
+
 export async function applyHomeConfiguration(configuration: HomeConfiguration): Promise<HomeConfigurationResult> {
   return invoke<HomeConfigurationResult>('apply_home_configuration', { configuration })
 }

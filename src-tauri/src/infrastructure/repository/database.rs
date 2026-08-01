@@ -268,9 +268,36 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
+        // Repair the original bundled Alibaba DoH3 seed, which used an IP as
+        // the TLS SNI. Alibaba's HTTP/3 endpoint requires dns.alidns.com.
+        self.repair_legacy_doh3_seed().await?;
+
         // Seed default upstream servers if none exist
         self.seed_default_upstreams().await?;
 
+        Ok(())
+    }
+
+    /// Repair only the known bundled DoH3 seed from versions before 0.0.2.
+    ///
+    /// The old value used Alibaba's IP as the TLS SNI. This is intentionally
+    /// limited to the bundled name, protocol, and exact legacy addresses so a
+    /// user's independently configured DoH3 server is never rewritten.
+    async fn repair_legacy_doh3_seed(&self) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE upstream_servers
+            SET address = 'https://dns.alidns.com/dns-query', updated_at = CURRENT_TIMESTAMP
+            WHERE name = '阿里云H3'
+              AND protocol = 'doh3'
+              AND address IN (
+                  'https://223.5.5.5/dns-query',
+                  'https://223.6.6.6/dns-query'
+              )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -284,7 +311,7 @@ impl Database {
         if count.0 == 0 {
             // Insert default upstream servers
             let default_servers = [
-                ("阿里云H3", "https://223.6.6.6/dns-query", "doh3"),
+                ("阿里云H3", "https://dns.alidns.com/dns-query", "doh3"),
                 ("阿里云Quic", "223.5.5.5:853", "doq"),
             ];
 

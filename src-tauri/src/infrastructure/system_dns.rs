@@ -3,12 +3,13 @@
 use std::collections::HashSet;
 use std::net::IpAddr;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Mutex as AsyncMutex, Notify, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
@@ -77,6 +78,7 @@ pub trait SystemDnsPlatform: Send + Sync + 'static {
     fn list_network_services(&self) -> Result<Vec<String>>;
     fn get_servers(&self, service: &str) -> Result<Vec<IpAddr>>;
     fn set_servers(&self, service: &str, servers: &[IpAddr]) -> Result<()>;
+    fn clear_servers(&self, service: &str) -> Result<()>;
 }
 
 #[derive(Default)]
@@ -144,12 +146,23 @@ impl SystemDnsPlatform for MacOsSystemDnsPlatform {
         Self::run(&args)?;
         Ok(())
     }
+
+    fn clear_servers(&self, service: &str) -> Result<()> {
+        Self::run(&[
+            "-setdnsservers".to_string(),
+            service.to_string(),
+            "Empty".to_string(),
+        ])?;
+        Ok(())
+    }
 }
 
 pub struct SystemDnsSupervisor<P: SystemDnsPlatform> {
     platform: Arc<P>,
     config: Arc<RwLock<SystemDnsConfig>>,
     config_changed: Arc<Notify>,
+    operation_lock: Arc<AsyncMutex<()>>,
+    shutting_down: AtomicBool,
 }
 
 impl<P: SystemDnsPlatform> SystemDnsSupervisor<P> {
@@ -159,6 +172,8 @@ impl<P: SystemDnsPlatform> SystemDnsSupervisor<P> {
             platform,
             config: Arc::new(RwLock::new(config)),
             config_changed: Arc::new(Notify::new()),
+            operation_lock: Arc::new(AsyncMutex::new(())),
+            shutting_down: AtomicBool::new(false),
         })
     }
 
@@ -174,28 +189,96 @@ impl<P: SystemDnsPlatform> SystemDnsSupervisor<P> {
     }
 
     pub async fn inspect(&self) -> Result<Vec<NetworkServiceDns>> {
-        let config = self.config().await;
-        let platform = self.platform.clone();
-        tokio::task::spawn_blocking(move || Self::read_all_services(platform, config))
-            .await
-            .context("读取网络服务 DNS 的任务失败")?
+        let _operation = self.operation_lock.lock().await;
+        self.inspect_without_lock().await
     }
 
     pub async fn enforce_once(&self) -> Result<Vec<NetworkServiceDns>> {
+        let _operation = self.operation_lock.lock().await;
         let config = self.config().await;
         let platform = self.platform.clone();
+        let should_enforce = !self.shutting_down.load(Ordering::Acquire);
         tokio::task::spawn_blocking(move || {
-            for binding in config.bindings.iter().filter(|binding| binding.enabled) {
-                let current = platform.get_servers(&binding.service)?;
-                if current != binding.preset_servers {
-                    platform.set_servers(&binding.service, &binding.preset_servers)?;
-                    info!(service = %binding.service, "Corrected macOS DNS servers");
+            if should_enforce {
+                for binding in config.bindings.iter().filter(|binding| binding.enabled) {
+                    let current = platform.get_servers(&binding.service)?;
+                    if current != binding.preset_servers {
+                        platform.set_servers(&binding.service, &binding.preset_servers)?;
+                        info!(service = %binding.service, "Corrected macOS DNS servers");
+                    }
                 }
             }
             Self::read_all_services(platform, config)
         })
         .await
         .context("系统 DNS 校正任务失败")?
+    }
+
+    pub async fn clear_service(&self, service: &str) -> Result<NetworkServiceDns> {
+        let service = service.trim();
+        if service.is_empty() {
+            bail!("网络服务名称不能为空");
+        }
+        let _operation = self.operation_lock.lock().await;
+        let config = self.config().await;
+        let platform = self.platform.clone();
+        let service_name = service.to_string();
+        tokio::task::spawn_blocking(move || {
+            platform.clear_servers(&service_name)?;
+            info!(service = %service_name, "Cleared macOS DNS servers");
+            Self::read_all_services(platform, config)?
+                .into_iter()
+                .find(|item| item.service == service_name)
+                .with_context(|| format!("清空后未找到网络服务: {}", service_name))
+        })
+        .await
+        .context("清空网络服务 DNS 的任务失败")?
+    }
+
+    pub async fn clear_configured_services_for_exit(&self) -> Result<()> {
+        self.shutting_down.store(true, Ordering::Release);
+        let result = self.clear_configured_services().await;
+        if result.is_err() {
+            self.shutting_down.store(false, Ordering::Release);
+            self.config_changed.notify_waiters();
+        }
+        result
+    }
+
+    async fn clear_configured_services(&self) -> Result<()> {
+        let _operation = self.operation_lock.lock().await;
+        let services = self
+            .config()
+            .await
+            .bindings
+            .into_iter()
+            .map(|binding| binding.service)
+            .collect::<Vec<_>>();
+        let platform = self.platform.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut failures = Vec::new();
+            for service in services {
+                match platform.clear_servers(&service) {
+                    Ok(()) => info!(service = %service, "Cleared macOS DNS servers before exit"),
+                    Err(error) => failures.push(format!("{}: {}", service, error)),
+                }
+            }
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                bail!("退出前清空系统 DNS 失败: {}", failures.join("；"))
+            }
+        })
+        .await
+        .context("退出前清空系统 DNS 的任务失败")?
+    }
+
+    async fn inspect_without_lock(&self) -> Result<Vec<NetworkServiceDns>> {
+        let config = self.config().await;
+        let platform = self.platform.clone();
+        tokio::task::spawn_blocking(move || Self::read_all_services(platform, config))
+            .await
+            .context("读取网络服务 DNS 的任务失败")?
     }
 
     fn read_all_services(
@@ -285,6 +368,10 @@ mod tests {
                 bail!("Unknown service: {}", service);
             }
             Ok(())
+        }
+
+        fn clear_servers(&self, service: &str) -> Result<()> {
+            self.set_servers(service, &[])
         }
     }
 
