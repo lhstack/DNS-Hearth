@@ -118,7 +118,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Refresh } from '@element-plus/icons-vue'
 import api from '../api'
@@ -139,6 +139,7 @@ interface Listener {
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 const loading = ref(false)
+const hydrating = ref(false)
 const saving = ref(false)
 const saveStage = ref('正在应用…')
 const applyError = ref('')
@@ -158,6 +159,7 @@ function messageOf(error: unknown): string {
 
 async function loadConfiguration() {
   if (!isTauri) return
+  hydrating.value = true
   loading.value = true
   try {
     const [config, serviceStatus, listenerResponse] = await Promise.all([
@@ -174,6 +176,8 @@ async function loadConfiguration() {
     ElMessage.error(messageOf(error))
   } finally {
     loading.value = false
+    await nextTick()
+    hydrating.value = false
   }
 }
 
@@ -220,7 +224,7 @@ function buildBindings() {
 }
 
 function scheduleApply() {
-  if (!isTauri || loading.value) return
+  if (!isTauri || loading.value || hydrating.value) return
   if (applyTimer !== undefined) window.clearTimeout(applyTimer)
   applyTimer = window.setTimeout(() => {
     applyTimer = undefined
@@ -247,8 +251,14 @@ async function applyConfiguration() {
       )),
     ])
     if (attempt !== saveAttempt) return
-    services.value = result.services
-    Object.assign(udp, result.udp_listener)
+    hydrating.value = true
+    try {
+      services.value = result.services
+      Object.assign(udp, result.udp_listener)
+      await nextTick()
+    } finally {
+      hydrating.value = false
+    }
     ElMessage.success('配置已自动应用')
   } catch (error) {
     if (attempt !== saveAttempt) return
