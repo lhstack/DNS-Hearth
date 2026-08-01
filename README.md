@@ -123,7 +123,7 @@ com.lhstack.dns-hearth
 因此 macOS 应用数据目录是：
 
 ```text
-~/Library/Application Support/com.lhstack.dns-hearth/
+~/Library/Application\ Support/com.lhstack.dns-hearth/
 ```
 
 ### 数据库
@@ -131,14 +131,14 @@ com.lhstack.dns-hearth
 SQLite 主数据库文件：
 
 ```text
-~/Library/Application Support/com.lhstack.dns-hearth/dns-hearth.db
+~/Library/Application\ Support/com.lhstack.dns-hearth/dns-hearth.db
 ```
 
 应用运行期间还可能出现 SQLite WAL 文件：
 
 ```text
-~/Library/Application Support/com.lhstack.dns-hearth/dns-hearth.db-wal
-~/Library/Application Support/com.lhstack.dns-hearth/dns-hearth.db-shm
+~/Library/Application\ Support/com.lhstack.dns-hearth/dns-hearth.db-wal
+~/Library/Application\ Support/com.lhstack.dns-hearth/dns-hearth.db-shm
 ```
 
 数据库中保存的内容包括网络服务 DNS 配置、本地记录、重写规则、上游服务器、缓存配置、查询策略和查询日志等。
@@ -148,7 +148,7 @@ SQLite 主数据库文件：
 日志目录：
 
 ```text
-~/Library/Application Support/com.lhstack.dns-hearth/logs/
+~/Library/Application\ Support/com.lhstack.dns-hearth/logs/
 ```
 
 日志文件以 `dns-proxy.log` 为基础名称，并按天轮转，例如：
@@ -170,13 +170,13 @@ logs/dns-proxy.log.2026-08-01
 然后输入：
 
 ```text
-~/Library/Application Support/com.lhstack.dns-hearth/
+~/Library/Application\ Support/com.lhstack.dns-hearth/
 ```
 
 也可以在终端执行：
 
 ```bash
-open "$HOME/Library/Application Support/com.lhstack.dns-hearth"
+open "$HOME/Library/Application\ Support/com.lhstack.dns-hearth"
 ```
 
 ### 备份与清理
@@ -184,7 +184,7 @@ open "$HOME/Library/Application Support/com.lhstack.dns-hearth"
 备份前应先完全退出 DNS Hearth，再复制整个目录：
 
 ```text
-~/Library/Application Support/com.lhstack.dns-hearth/
+~/Library/Application\ Support/com.lhstack.dns-hearth/
 ```
 
 不要在应用运行时只复制 `dns-hearth.db`，因为尚未合并的数据可能仍位于 `-wal` 文件中。
