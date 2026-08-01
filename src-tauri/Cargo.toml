@@ -1,6 +1,6 @@
 [package]
 name = "dns-hearth"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 description = "macOS DNS binding and full-featured local DNS proxy"
 authors = ["lhstack@foxmail.com"]

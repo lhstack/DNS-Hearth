@@ -33,7 +33,7 @@ DNS Hearth 是一款面向 macOS 的本地 DNS 管理与转发工具，主要用
 
 ```text
 src-tauri/target/release/bundle/macos/DNS Hearth.app
-src-tauri/target/release/bundle/dmg/DNS Hearth_0.1.0_aarch64.dmg
+src-tauri/target/release/bundle/dmg/DNS Hearth_0.0.1_aarch64.dmg
 ```
 
 安装步骤：
