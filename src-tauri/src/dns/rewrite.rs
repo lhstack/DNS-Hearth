@@ -10,6 +10,7 @@
 //! - Map to another domain
 //! - Block (return NXDOMAIN)
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -209,14 +210,9 @@ impl RewriteRule {
             else {
                 false
             }
-        } else if pattern.contains('*') {
-            // General wildcard pattern
-            let parts: Vec<&str> = pattern.split('*').collect();
-            if parts.len() == 2 {
-                domain.starts_with(parts[0]) && domain.ends_with(parts[1])
-            } else {
-                false
-            }
+        } else if let Some((prefix, suffix)) = pattern.split_once('*') {
+            // General wildcard pattern. Multiple '*' characters are not supported.
+            !suffix.contains('*') && domain.starts_with(prefix) && domain.ends_with(suffix)
         } else {
             // No wildcard, treat as exact match
             domain == pattern
@@ -242,12 +238,107 @@ pub struct RewriteResult {
     pub action: RewriteAction,
 }
 
+#[derive(Default)]
+struct RewriteIndex {
+    exact: HashMap<String, Vec<RewriteRule>>,
+    wildcard_suffix: HashMap<String, Vec<RewriteRule>>,
+    patterns: Vec<RewriteRule>,
+    rule_count: usize,
+}
+
+impl RewriteIndex {
+    fn from_rules(rules: Vec<RewriteRule>) -> Self {
+        let mut index = Self::default();
+        for rule in rules.into_iter().filter(|rule| rule.enabled) {
+            index.insert(rule);
+        }
+        index.finish_bulk_load();
+        index
+    }
+
+    /// Insert an already compiled rule into the matching index.
+    fn insert(&mut self, rule: RewriteRule) {
+        if !rule.enabled {
+            return;
+        }
+        match rule.match_type {
+            MatchType::Exact => {
+                let rules = self.exact.entry(rule.pattern_lower.clone()).or_default();
+                rules.push(rule);
+                rules.sort_by(compare_rule_precedence);
+            }
+            MatchType::Wildcard if rule.pattern_lower.starts_with("*.") => {
+                let suffix = rule.pattern_lower[1..].to_string();
+                self.wildcard_suffix.entry(suffix).or_default().push(rule);
+            }
+            MatchType::Wildcard | MatchType::Regex => self.patterns.push(rule),
+        }
+        self.rule_count += 1;
+    }
+
+    /// Sort non-exact buckets once after a bulk load.
+    fn finish_bulk_load(&mut self) {
+        for rules in self.wildcard_suffix.values_mut() {
+            rules.sort_by(compare_rule_precedence);
+        }
+        self.patterns.sort_by(compare_rule_precedence);
+    }
+
+    fn remove(&mut self, id: i64) {
+        let mut removed = 0usize;
+        self.exact.retain(|_, rules| {
+            let old_len = rules.len();
+            rules.retain(|rule| rule.id != id);
+            removed += old_len - rules.len();
+            !rules.is_empty()
+        });
+        self.wildcard_suffix.retain(|_, rules| {
+            let old_len = rules.len();
+            rules.retain(|rule| rule.id != id);
+            removed += old_len - rules.len();
+            !rules.is_empty()
+        });
+        let old_len = self.patterns.len();
+        self.patterns.retain(|rule| rule.id != id);
+        removed += old_len - self.patterns.len();
+        self.rule_count = self.rule_count.saturating_sub(removed);
+    }
+
+    fn ordered_rules(&self) -> Vec<RewriteRule> {
+        let mut rules: Vec<_> = self
+            .exact
+            .values()
+            .flat_map(|rules| rules.iter().cloned())
+            .chain(
+                self.wildcard_suffix
+                    .values()
+                    .flat_map(|rules| rules.iter().cloned()),
+            )
+            .chain(self.patterns.iter().cloned())
+            .collect();
+        rules.sort_by(compare_rule_precedence);
+        rules
+    }
+}
+
+fn compare_rule_precedence(left: &RewriteRule, right: &RewriteRule) -> std::cmp::Ordering {
+    right
+        .priority
+        .cmp(&left.priority)
+        .then_with(|| left.id.cmp(&right.id))
+}
+
+fn precedes(left: &RewriteRule, right: &RewriteRule) -> bool {
+    left.priority > right.priority || (left.priority == right.priority && left.id < right.id)
+}
+
 /// DNS Rewrite Engine
 ///
-/// Manages rewrite rules and performs domain rewriting.
+/// Exact domains are indexed by lowercase name. Wildcard and regular-expression
+/// rules remain in precedence order because they can overlap arbitrary domains.
 pub struct RewriteEngine {
     /// Loaded rules (sorted by priority, highest first)
-    rules: RwLock<Vec<RewriteRule>>,
+    rules: RwLock<RewriteIndex>,
     /// Database connection for persistence
     db: Option<Arc<Database>>,
 }
@@ -257,7 +348,7 @@ impl RewriteEngine {
     /// Create a new rewrite engine without database
     pub fn new() -> Self {
         Self {
-            rules: RwLock::new(Vec::new()),
+            rules: RwLock::new(RewriteIndex::default()),
             db: None,
         }
     }
@@ -265,7 +356,7 @@ impl RewriteEngine {
     /// Create a new rewrite engine with database connection
     pub fn with_db(db: Arc<Database>) -> Self {
         Self {
-            rules: RwLock::new(Vec::new()),
+            rules: RwLock::new(RewriteIndex::default()),
             db: Some(db),
         }
     }
@@ -278,17 +369,12 @@ impl RewriteEngine {
     /// Load rules from database
     pub async fn load_rules(&self) -> anyhow::Result<()> {
         if let Some(ref db) = self.db {
-            let db_rules = db.rewrite_rules().list().await?;
-            let mut rules: Vec<RewriteRule> = db_rules
-                .iter()
-                .filter_map(|r| RewriteRule::from_db(r))
-                .collect();
-
-            // Sort by priority (highest first)
-            rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+            let db_rules = db.rewrite_rules().list_enabled().await?;
+            let rules = db_rules.iter().filter_map(RewriteRule::from_db).collect();
+            let next_index = RewriteIndex::from_rules(rules);
 
             let mut current_rules = self.rules.write().await;
-            *current_rules = rules;
+            *current_rules = next_index;
         }
         Ok(())
     }
@@ -306,46 +392,86 @@ impl RewriteEngine {
     pub async fn check(&self, domain: &str) -> Option<RewriteResult> {
         let domain_lower = domain.to_lowercase();
         let rules = self.rules.read().await;
-
-        for rule in rules.iter() {
-            if rule.matches_lowercase(&domain_lower) {
-                return Some(RewriteResult {
-                    rule_id: rule.id,
-                    action: rule.action.clone(),
-                });
+        let exact_match = rules
+            .exact
+            .get(&domain_lower)
+            .and_then(|candidates| candidates.first());
+        let mut wildcard_match = None;
+        for (index, _) in domain_lower.match_indices('.') {
+            let suffix = &domain_lower[index..];
+            let Some(candidate) = rules
+                .wildcard_suffix
+                .get(suffix)
+                .and_then(|candidates| candidates.first())
+            else {
+                continue;
+            };
+            if domain_lower.len() > suffix.len()
+                && wildcard_match
+                    .as_ref()
+                    .is_none_or(|current: &&RewriteRule| precedes(candidate, current))
+            {
+                wildcard_match = Some(candidate);
             }
         }
 
-        None
+        for rule in &rules.patterns {
+            if let Some(exact) = exact_match {
+                if precedes(exact, rule) {
+                    return Some(rewrite_result(exact));
+                }
+            }
+            if let Some(wildcard) = wildcard_match {
+                if precedes(wildcard, rule) {
+                    return Some(rewrite_result(wildcard));
+                }
+            }
+            if rule.matches_lowercase(&domain_lower) {
+                return Some(rewrite_result(rule));
+            }
+        }
+
+        [exact_match, wildcard_match]
+            .into_iter()
+            .flatten()
+            .min_by(|left, right| compare_rule_precedence(left, right))
+            .map(rewrite_result)
     }
 
     /// Add a rule (in-memory only, use database for persistence)
     pub async fn add_rule(&self, rule: RewriteRule) {
         let mut rules = self.rules.write().await;
-        rules.push(rule);
-        rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+        rules.insert(rule);
+        rules.finish_bulk_load();
     }
 
     /// Remove a rule by ID
     pub async fn remove_rule(&self, id: i64) {
         let mut rules = self.rules.write().await;
-        rules.retain(|r| r.id != id);
+        rules.remove(id);
     }
 
     /// Get all rules
     pub async fn list_rules(&self) -> Vec<RewriteRule> {
-        self.rules.read().await.clone()
+        self.rules.read().await.ordered_rules()
     }
 
     /// Clear all rules
     pub async fn clear_rules(&self) {
         let mut rules = self.rules.write().await;
-        rules.clear();
+        *rules = RewriteIndex::default();
     }
 
     /// Get the number of rules
     pub async fn rule_count(&self) -> usize {
-        self.rules.read().await.len()
+        self.rules.read().await.rule_count
+    }
+}
+
+fn rewrite_result(rule: &RewriteRule) -> RewriteResult {
+    RewriteResult {
+        rule_id: rule.id,
+        action: rule.action.clone(),
     }
 }
 

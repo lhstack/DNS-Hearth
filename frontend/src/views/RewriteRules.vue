@@ -26,7 +26,7 @@
             <el-icon><Edit /></el-icon>
           </div>
           <div class="stat-info">
-            <span class="stat-value">{{ rules.length }}</span>
+            <span class="stat-value">{{ total }}</span>
             <span class="stat-label">总数</span>
           </div>
         </div>
@@ -118,6 +118,17 @@
             <el-empty description="暂无重写规则" />
           </template>
         </el-table>
+        <div class="pagination-container">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :page-sizes="[20, 50, 100]"
+            :total="total"
+            layout="total, sizes, prev, pager, next"
+            @size-change="handleSizeChange"
+            @current-change="fetchRules"
+          />
+        </div>
       </div>
     </el-card>
 
@@ -141,7 +152,20 @@
             :rows="8"
             placeholder="每行一个域名，例如：&#10;ads.example.com&#10;tracker.example.com&#10;*.ads.com"
           />
-          <div class="form-hint">支持换行、逗号、分号分隔，每个域名将创建一条规则</div>
+          <div class="batch-import-bar">
+            <el-upload
+              :auto-upload="false"
+              :show-file-list="false"
+              accept=".txt,.list,.conf,text/plain"
+              :on-change="handleDomainFileChange"
+            >
+              <el-button :icon="Upload" :loading="readingFile">从文件导入</el-button>
+            </el-upload>
+            <span class="batch-import-count">已识别 {{ parsedPatternCount }} 个域名</span>
+          </div>
+          <div class="form-hint">
+            每行一个域名。支持 <code>#</code> 与 <code>!</code> 开头的注释行，重复域名会自动去重。
+          </div>
         </el-form-item>
         <el-row :gutter="16">
           <el-col :xs="24" :sm="12">
@@ -292,8 +316,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadFile } from 'element-plus'
 import { Plus, Edit, Delete, CircleCheck, CloseBold, Switch, Upload } from '@element-plus/icons-vue'
 import api from '../api'
 import { useResponsive } from '../composables/useResponsive'
@@ -315,18 +339,23 @@ interface RewriteRule {
 
 const rules = ref<RewriteRule[]>([])
 const loading = ref(false)
+const total = ref(0)
+const currentPage = ref(1)
+const pageSize = ref(20)
+const stats = reactive({ enabled: 0, blocked: 0, mapped: 0 })
 const dialogVisible = ref(false)
 const batchDialogVisible = ref(false)
 const isEditing = ref(false)
 const submitting = ref(false)
 const batchSubmitting = ref(false)
+const readingFile = ref(false)
 const formRef = ref<FormInstance>()
 const batchFormRef = ref<FormInstance>()
 const editingId = ref<number | null>(null)
 
-const enabledCount = computed(() => rules.value.filter(r => r.enabled).length)
-const blockCount = computed(() => rules.value.filter(r => r.action_type === 'block').length)
-const mapCount = computed(() => rules.value.filter(r => r.action_type !== 'block').length)
+const enabledCount = computed(() => stats.enabled)
+const blockCount = computed(() => stats.blocked)
+const mapCount = computed(() => stats.mapped)
 
 const formData = reactive({
   pattern: '',
@@ -361,9 +390,37 @@ const batchFormData = reactive({
   enabled: true
 })
 
+/** 每行一个域名，跳过空行和 # / ! 注释行，按顺序去重。 */
+function parseDomainPatterns(text: string): string[] {
+  const seen = new Set<string>()
+  const patterns: string[] = []
+
+  for (const line of text.split(/\r?\n/)) {
+    const domain = line.trim()
+    if (!domain || domain.startsWith('#') || domain.startsWith('!')) continue
+    if (seen.has(domain)) continue
+    seen.add(domain)
+    patterns.push(domain)
+  }
+
+  return patterns
+}
+
+const parsedPatternCount = computed(() => parseDomainPatterns(batchFormData.patterns).length)
+
 const batchFormRules: FormRules = {
   patterns: [
-    { required: true, message: '请输入域名列表', trigger: 'blur' }
+    { required: true, message: '请输入域名列表', trigger: 'blur' },
+    {
+      validator: (_rule, value: string, callback) => {
+        if (parseDomainPatterns(value ?? '').length === 0) {
+          callback(new Error('未识别到有效域名，请检查内容'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur'
+    }
   ],
   match_type: [
     { required: true, message: '请选择匹配类型', trigger: 'change' }
@@ -429,8 +486,14 @@ function getActionValuePlaceholder(actionType: string): string {
 async function fetchRules() {
   loading.value = true
   try {
-    const response = await api.get('/api/rewrite')
+    const response = await api.get('/api/rewrite', {
+      params: { page: currentPage.value, page_size: pageSize.value }
+    })
     rules.value = response.data.data
+    total.value = response.data.total
+    stats.enabled = response.data.stats.enabled
+    stats.blocked = response.data.stats.blocked
+    stats.mapped = response.data.stats.mapped
   } catch (error: any) {
     ElMessage.error(error.response?.data?.message || '获取规则失败')
   } finally {
@@ -464,6 +527,23 @@ function openBatchDialog() {
   batchFormData.description = ''
   batchFormData.enabled = true
   batchDialogVisible.value = true
+}
+
+async function handleDomainFileChange(uploadFile: UploadFile) {
+  const file = uploadFile.raw
+  if (!file) return
+
+  readingFile.value = true
+  try {
+    batchFormData.patterns = await file.text()
+    await nextTick()
+    await batchFormRef.value?.validateField('patterns')
+    ElMessage.success(`已读取文件，共识别 ${parsedPatternCount.value} 个域名`)
+  } catch (error) {
+    ElMessage.error(`读取域名文件失败：${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    readingFile.value = false
+  }
 }
 
 function openEditDialog(rule: RewriteRule) {
@@ -519,19 +599,21 @@ async function submitBatchForm() {
 
     batchSubmitting.value = true
     try {
-      const payload = {
-        patterns: batchFormData.patterns,
+      const patterns = parseDomainPatterns(batchFormData.patterns)
+      const payload = patterns.map(pattern => ({
+        pattern,
         match_type: batchFormData.match_type,
         action_type: batchFormData.action_type,
         action_value: batchFormData.action_type === 'block' ? null : batchFormData.action_value || null,
         priority: batchFormData.priority,
         enabled: batchFormData.enabled,
         description: batchFormData.description || null
-      }
+      }))
 
       const response = await api.post('/api/rewrite/batch', payload)
       ElMessage.success(`成功创建 ${response.data.created} 条规则`)
       batchDialogVisible.value = false
+      currentPage.value = 1
       fetchRules()
     } catch (error: any) {
       const message = error.response?.data?.message || '批量创建失败'
@@ -546,6 +628,7 @@ async function toggleEnabled(rule: RewriteRule) {
   try {
     await api.put(`/api/rewrite/${rule.id}`, { enabled: rule.enabled })
     ElMessage.success(rule.enabled ? '规则已启用' : '规则已禁用')
+    fetchRules()
   } catch (error: any) {
     rule.enabled = !rule.enabled
     ElMessage.error(error.response?.data?.message || '操作失败')
@@ -571,6 +654,11 @@ async function confirmDelete(rule: RewriteRule) {
       ElMessage.error(error.response?.data?.message || '删除失败')
     }
   }
+}
+
+function handleSizeChange() {
+  currentPage.value = 1
+  fetchRules()
 }
 
 onMounted(() => {
@@ -608,6 +696,18 @@ onMounted(() => {
 .header-actions {
   display: flex;
   gap: 12px;
+}
+
+.batch-import-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.batch-import-count {
+  color: #909399;
+  font-size: 12px;
 }
 
 .form-hint {
@@ -712,6 +812,13 @@ onMounted(() => {
 .table-wrapper {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+.pagination-container {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 20px;
+  border-top: 1px solid #ebeef5;
 }
 
 /* 响应式 */

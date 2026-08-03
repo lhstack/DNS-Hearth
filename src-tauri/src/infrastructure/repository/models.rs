@@ -60,6 +60,15 @@ pub struct RewriteRule {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Aggregate counts for the rewrite rule management page.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, FromRow)]
+pub struct RewriteRuleStats {
+    pub total: i64,
+    pub enabled: i64,
+    pub blocked: i64,
+    pub mapped: i64,
+}
+
 /// Create rewrite rule request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateRewriteRule {

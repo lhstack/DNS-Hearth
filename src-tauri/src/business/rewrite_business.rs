@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::dns::RewriteEngine;
 use crate::infrastructure::common::error::{AppError, AppResult};
 use crate::infrastructure::repository::{
-    CreateRewriteRule, Database, RewriteRule, UpdateRewriteRule,
+    CreateRewriteRule, Database, RewriteRule, RewriteRuleStats, UpdateRewriteRule,
 };
 
 /// Orchestrates rewrite rule management and engine reloads.
@@ -22,8 +22,12 @@ impl RewriteBusiness {
         Self { db, engine }
     }
 
-    pub async fn list(&self) -> AppResult<Vec<RewriteRule>> {
-        Ok(self.db.rewrite_rules().list().await?)
+    pub async fn list_paged(
+        &self,
+        page: i64,
+        page_size: i64,
+    ) -> AppResult<(Vec<RewriteRule>, RewriteRuleStats)> {
+        Ok(self.db.rewrite_rules().list_paged(page, page_size).await?)
     }
 
     pub async fn create(&self, rule: CreateRewriteRule) -> AppResult<RewriteRule> {

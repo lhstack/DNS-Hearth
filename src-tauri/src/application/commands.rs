@@ -184,8 +184,30 @@ async fn dispatch(state: &AppState, request: InvokeRequest) -> anyhow::Result<Va
             Ok(json!({"message":"deleted"}))
         }
         ("GET", "/api/rewrite") => {
-            let data = state.rewrite.list().await?;
-            Ok(json!({"data":data,"total":data.len()}))
+            let page = request
+                .params
+                .get("page")
+                .and_then(Value::as_i64)
+                .unwrap_or(1);
+            let page_size = request
+                .params
+                .get("page_size")
+                .and_then(Value::as_i64)
+                .unwrap_or(20);
+            if page < 1 {
+                anyhow::bail!("rewrite page must be at least 1");
+            }
+            if !(1..=100).contains(&page_size) {
+                anyhow::bail!("rewrite page_size must be between 1 and 100");
+            }
+            let (data, stats) = state.rewrite.list_paged(page, page_size).await?;
+            Ok(json!({
+                "data": data,
+                "total": stats.total,
+                "stats": stats,
+                "page": page,
+                "page_size": page_size
+            }))
         }
         ("POST", "/api/rewrite") => {
             value(json!({"data": state.rewrite.create(from_value(request.payload)?).await?}))

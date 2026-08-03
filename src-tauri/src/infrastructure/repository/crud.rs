@@ -284,7 +284,8 @@ impl RewriteRuleRepository {
         Ok(result)
     }
 
-    /// List all rewrite rules ordered by priority
+    /// List all rewrite rules ordered by priority.
+    #[allow(dead_code)]
     pub async fn list(&self) -> Result<Vec<RewriteRule>> {
         let result = sqlx::query_as::<_, RewriteRule>(
             "SELECT * FROM rewrite_rules ORDER BY priority DESC, id ASC",
@@ -295,8 +296,38 @@ impl RewriteRuleRepository {
         Ok(result)
     }
 
-    /// List enabled rewrite rules ordered by priority
-    #[allow(dead_code)]
+    /// List one management-page slice and aggregate counts without loading all rows.
+    pub async fn list_paged(
+        &self,
+        page: i64,
+        page_size: i64,
+    ) -> Result<(Vec<RewriteRule>, RewriteRuleStats)> {
+        let offset = (page - 1) * page_size;
+        let rules = sqlx::query_as::<_, RewriteRule>(
+            "SELECT * FROM rewrite_rules ORDER BY priority DESC, id ASC LIMIT ? OFFSET ?",
+        )
+        .bind(page_size)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let stats = sqlx::query_as::<_, RewriteRuleStats>(
+            r#"
+            SELECT
+                COUNT(*) AS total,
+                COALESCE(SUM(CASE WHEN enabled = TRUE THEN 1 ELSE 0 END), 0) AS enabled,
+                COALESCE(SUM(CASE WHEN action_type = 'block' THEN 1 ELSE 0 END), 0) AS blocked,
+                COALESCE(SUM(CASE WHEN action_type != 'block' THEN 1 ELSE 0 END), 0) AS mapped
+            FROM rewrite_rules
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok((rules, stats))
+    }
+
+    /// List enabled rewrite rules ordered by priority and stable ID order.
     pub async fn list_enabled(&self) -> Result<Vec<RewriteRule>> {
         let result = sqlx::query_as::<_, RewriteRule>(
             "SELECT * FROM rewrite_rules WHERE enabled = TRUE ORDER BY priority DESC, id ASC",

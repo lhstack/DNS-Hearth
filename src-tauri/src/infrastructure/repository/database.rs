@@ -152,9 +152,15 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        // Index for rewrite rules query: WHERE enabled = TRUE ORDER BY priority
+        // Index for rewrite rule management and engine loading order.
         sqlx::query(
-            r#"CREATE INDEX IF NOT EXISTS idx_rewrite_rules_enabled_priority ON rewrite_rules(enabled, priority)"#,
+            r#"CREATE INDEX IF NOT EXISTS idx_rewrite_rules_priority_id ON rewrite_rules(priority DESC, id ASC)"#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"CREATE INDEX IF NOT EXISTS idx_rewrite_rules_enabled_priority_id ON rewrite_rules(enabled, priority DESC, id ASC)"#,
         )
         .execute(&self.pool)
         .await?;
